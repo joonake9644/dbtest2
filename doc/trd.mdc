@@ -1,5 +1,805 @@
 ---
-description:
+description: Technical Requirements Document for Meeting Room System
 globs:
 alwaysApply: true
 ---
+
+# TRD - 회의실 관리 시스템 기술 요구사항
+
+## 1. 시스템 아키텍처
+
+### 1.1 기술 스택
+- **Frontend**: Next.js 14+ (React 18+, App Router)
+- **Database**: Supabase (PostgreSQL 15+)
+- **Styling**: Tailwind CSS 3+ + shadcn-ui
+- **Deployment**: Vercel
+- **Language**: TypeScript
+- **Real-time**: Supabase Realtime
+- **Form Management**: React Hook Form + Zod
+
+### 1.2 아키텍처 패턴
+```
+┌─────────────────┐
+│   Presentation  │ ← React Components (UI)
+├─────────────────┤
+│ Business Logic  │ ← Services (비즈니스 로직)
+├─────────────────┤
+│  Data Access    │ ← Supabase Client
+├─────────────────┤
+│    Database     │ ← PostgreSQL (Supabase)
+└─────────────────┘
+```
+
+### 1.3 폴더 구조 (App Router)
+```
+src/
+├── app/                       # Next.js App Router
+│   ├── globals.css           # 글로벌 스타일
+│   ├── layout.tsx            # 루트 레이아웃
+│   ├── page.tsx              # 홈페이지 (예약 현황)
+│   ├── my-reservations/      # 내 예약 조회
+│   │   └── page.tsx
+│   └── admin/                # 관리자 페이지
+│       └── page.tsx
+├── components/
+│   ├── ui/                   # shadcn-ui 컴포넌트
+│   ├── admin/                # 관리자 컴포넌트
+│   ├── user/                 # 사용자 컴포넌트
+│   └── common/               # 공통 컴포넌트
+├── lib/
+│   ├── supabase/             # Supabase 클라이언트
+│   │   ├── client.ts         # 클라이언트 사이드
+│   │   └── server.ts         # 서버 사이드
+│   ├── services/             # 비즈니스 로직
+│   └── utils.ts              # 유틸리티
+└── types/                    # 타입 정의
+    ├── database.ts           # Supabase 데이터베이스 타입
+    └── index.ts              # 공통 타입
+```
+
+## 2. 데이터베이스 설계
+
+### 2.1 테이블 스키마
+
+**meeting_rooms 테이블**
+```sql
+CREATE TABLE IF NOT EXISTS meeting_rooms (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL UNIQUE,
+    location VARCHAR(200) NOT NULL,
+    capacity INTEGER NOT NULL CHECK (capacity > 0),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+**reservations 테이블**
+```sql
+CREATE TABLE IF NOT EXISTS reservations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id UUID NOT NULL REFERENCES meeting_rooms(id) ON DELETE CASCADE,
+    reservation_date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    reserver_name VARCHAR(50) NOT NULL,
+    reserver_phone VARCHAR(20) NOT NULL,
+    reserver_password VARCHAR(100) NOT NULL,
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+### 2.2 인덱스 및 제약조건
+```sql
+-- 시간 중복 방지 (GIST 확장 필요)
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+ALTER TABLE reservations 
+ADD CONSTRAINT no_overlapping_reservations 
+EXCLUDE USING GIST (
+    room_id WITH =,
+    reservation_date WITH =,
+    tsrange(start_time::text, end_time::text) WITH &&
+) WHERE (status = 'active');
+
+-- 성능 최적화 인덱스
+CREATE INDEX IF NOT EXISTS idx_reservations_phone ON reservations(reserver_phone);
+CREATE INDEX IF NOT EXISTS idx_reservations_date_room ON reservations(reservation_date, room_id, status);
+CREATE INDEX IF NOT EXISTS idx_meeting_rooms_name ON meeting_rooms(name);
+```
+
+## 3. TypeScript 타입 정의
+
+### 3.1 데이터베이스 타입 (types/database.ts)
+```typescript
+export interface Database {
+  public: {
+    Tables: {
+      meeting_rooms: {
+        Row: {
+          id: string;
+          name: string;
+          location: string;
+          capacity: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          location: string;
+          capacity: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          location?: string;
+          capacity?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      reservations: {
+        Row: {
+          id: string;
+          room_id: string;
+          reservation_date: string;
+          start_time: string;
+          end_time: string;
+          reserver_name: string;
+          reserver_phone: string;
+          reserver_password: string;
+          status: 'active' | 'cancelled';
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          room_id: string;
+          reservation_date: string;
+          start_time: string;
+          end_time: string;
+          reserver_name: string;
+          reserver_phone: string;
+          reserver_password: string;
+          status?: 'active' | 'cancelled';
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          room_id?: string;
+          reservation_date?: string;
+          start_time?: string;
+          end_time?: string;
+          reserver_name?: string;
+          reserver_phone?: string;
+          reserver_password?: string;
+          status?: 'active' | 'cancelled';
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+    };
+  };
+}
+```
+
+### 3.2 공통 타입 (types/index.ts)
+```typescript
+export type Room = Database['public']['Tables']['meeting_rooms']['Row'];
+export type Reservation = Database['public']['Tables']['reservations']['Row'];
+
+export interface CreateRoomData {
+  name: string;
+  location: string;
+  capacity: number;
+}
+
+export interface CreateReservationData {
+  room_id: string;
+  reservation_date: string;
+  start_time: string;
+  end_time: string;
+  reserver_name: string;
+  reserver_phone: string;
+  reserver_password: string;
+}
+
+export interface ServiceResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+export interface TimeSlot {
+  start: string;
+  end: string;
+}
+
+export interface RoomWithReservations extends Room {
+  reservations: Reservation[];
+}
+
+export interface ValidationErrors {
+  [key: string]: string;
+}
+
+export interface ReservationFormData {
+  reserver_name: string;
+  reserver_phone: string;
+  reserver_password: string;
+  reservation_date: string;
+  start_time: string;
+  end_time: string;
+}
+
+export interface RoomFormData {
+  name: string;
+  location: string;
+  capacity: number;
+}
+```
+
+## 4. 컴포넌트 설계
+
+### 4.1 사용자 컴포넌트
+
+**BookingCalendar.tsx**
+```typescript
+interface BookingCalendarProps {
+  selectedDate: Date;
+  onDateChange: (date: Date) => void;
+  onBookingClick: (roomId: string, timeSlot: TimeSlot) => void;
+}
+
+interface BookingCalendarState {
+  rooms: Room[];
+  reservations: Reservation[];
+  loading: boolean;
+  error: string | null;
+}
+```
+
+**ReservationForm.tsx**
+```typescript
+interface ReservationFormProps {
+  roomId: string;
+  selectedDate: Date;
+  selectedTime: TimeSlot;
+  onSubmit: (data: ReservationFormData) => Promise<void>;
+  onCancel: () => void;
+}
+
+interface ReservationFormState {
+  formData: ReservationFormData;
+  errors: ValidationErrors;
+  submitting: boolean;
+}
+```
+
+**MyReservations.tsx**
+```typescript
+interface MyReservationsProps {}
+
+interface MyReservationsState {
+  phone: string;
+  password: string;
+  reservations: Reservation[];
+  loading: boolean;
+  authenticated: boolean;
+  error: string | null;
+}
+```
+
+### 4.2 관리자 컴포넌트
+
+**AdminRoomList.tsx**
+```typescript
+interface AdminRoomListProps {}
+
+interface AdminRoomListState {
+  rooms: Room[];
+  loading: boolean;
+  selectedRoom: Room | null;
+  showForm: boolean;
+  error: string | null;
+}
+```
+
+**RoomForm.tsx**
+```typescript
+interface RoomFormProps {
+  room?: Room;
+  onSubmit: (data: RoomFormData) => Promise<void>;
+  onCancel: () => void;
+}
+
+interface RoomFormState {
+  formData: RoomFormData;
+  errors: ValidationErrors;
+  submitting: boolean;
+}
+```
+
+## 5. 서비스 레이어 설계
+
+### 5.1 roomService.ts
+```typescript
+export const roomService = {
+  // 모든 회의실 조회
+  async getAllRooms(): Promise<Room[]> {
+    const { data, error } = await supabase
+      .from('meeting_rooms')
+      .select('*')
+      .order('name');
+    
+    if (error) throw error;
+    return data;
+  },
+  
+  // 회의실 생성  
+  async createRoom(data: CreateRoomData): Promise<ServiceResult<Room>> {
+    try {
+      const { data: room, error } = await supabase
+        .from('meeting_rooms')
+        .insert(data)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      return { success: true, data: room };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '회의실 생성에 실패했습니다' 
+      };
+    }
+  },
+  
+  // 회의실 수정
+  async updateRoom(id: string, data: Partial<CreateRoomData>): Promise<ServiceResult<Room>> {
+    try {
+      const { data: room, error } = await supabase
+        .from('meeting_rooms')
+        .update(data)
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      return { success: true, data: room };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '회의실 수정에 실패했습니다' 
+      };
+    }
+  },
+  
+  // 회의실 삭제
+  async deleteRoom(id: string): Promise<ServiceResult<void>> {
+    try {
+      const { error } = await supabase
+        .from('meeting_rooms')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      return { success: true };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '회의실 삭제에 실패했습니다' 
+      };
+    }
+  }
+};
+```
+
+### 5.2 reservationService.ts
+```typescript
+export const reservationService = {
+  // 예약 현황 조회
+  async getReservationsByDate(date: Date): Promise<RoomWithReservations[]> {
+    const dateString = format(date, 'yyyy-MM-dd');
+    
+    const { data, error } = await supabase
+      .from('meeting_rooms')
+      .select(`
+        *,
+        reservations!inner(
+          id,
+          reservation_date,
+          start_time,
+          end_time,
+          reserver_name,
+          status
+        )
+      `)
+      .eq('reservations.reservation_date', dateString)
+      .eq('reservations.status', 'active')
+      .order('name');
+    
+    if (error) throw error;
+    return data;
+  },
+  
+  // 예약 생성
+  async createReservation(data: CreateReservationData): Promise<ServiceResult<Reservation>> {
+    try {
+      // 시간 중복 확인
+      const conflictCheck = await this.checkTimeConflict(
+        data.room_id,
+        data.reservation_date,
+        data.start_time,
+        data.end_time
+      );
+      
+      if (conflictCheck) {
+        return { 
+          success: false, 
+          error: '선택한 시간에 이미 예약이 있습니다' 
+        };
+      }
+      
+      const { data: reservation, error } = await supabase
+        .from('reservations')
+        .insert(data)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      return { success: true, data: reservation };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '예약 생성에 실패했습니다' 
+      };
+    }
+  },
+  
+  // 개인 예약 조회
+  async getMyReservations(phone: string, password: string): Promise<Reservation[]> {
+    const { data, error } = await supabase
+      .from('reservations')
+      .select(`
+        *,
+        meeting_rooms(name, location)
+      `)
+      .eq('reserver_phone', phone)
+      .eq('reserver_password', password)
+      .order('reservation_date', { ascending: false });
+    
+    if (error) throw error;
+    return data;
+  },
+  
+  // 예약 취소
+  async cancelReservation(id: string, phone: string, password: string): Promise<ServiceResult<void>> {
+    try {
+      const { error } = await supabase
+        .from('reservations')
+        .update({ status: 'cancelled' })
+        .eq('id', id)
+        .eq('reserver_phone', phone)
+        .eq('reserver_password', password);
+      
+      if (error) throw error;
+      
+      return { success: true };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '예약 취소에 실패했습니다' 
+      };
+    }
+  },
+  
+  // 시간 중복 확인
+  async checkTimeConflict(
+    roomId: string, 
+    date: string, 
+    startTime: string, 
+    endTime: string
+  ): Promise<boolean> {
+    const { data, error } = await supabase
+      .rpc('check_time_conflict', {
+        p_room_id: roomId,
+        p_date: date,
+        p_start_time: startTime,
+        p_end_time: endTime
+      });
+    
+    if (error) throw error;
+    return data > 0;
+  }
+};
+```
+
+## 6. 실시간 동기화 설계
+
+### 6.1 Supabase Realtime 설정
+```typescript
+// 실시간 구독 설정
+const subscription = supabase
+  .channel('reservations')
+  .on('postgres_changes', {
+    event: '*',
+    schema: 'public',
+    table: 'reservations'
+  }, handleRealtimeUpdate)
+  .subscribe();
+
+// 실시간 업데이트 처리
+function handleRealtimeUpdate(payload: RealtimePostgresChangesPayload<any>) {
+  switch(payload.eventType) {
+    case 'INSERT':
+      // 새 예약 추가
+      setReservations(prev => [...prev, payload.new as Reservation]);
+      break;
+    case 'UPDATE': 
+      // 예약 수정/취소
+      setReservations(prev => 
+        prev.map(r => r.id === payload.new.id ? payload.new as Reservation : r)
+      );
+      break;
+    case 'DELETE':
+      // 예약 삭제
+      setReservations(prev => 
+        prev.filter(r => r.id !== payload.old.id)
+      );
+      break;
+  }
+}
+```
+
+## 7. 환경 설정
+
+### 7.1 환경변수
+```bash
+# .env.local
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+# .env.production (Vercel)
+NEXT_PUBLIC_SUPABASE_URL=production-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=production-key
+```
+
+### 7.2 Supabase 클라이언트 설정
+```typescript
+// lib/supabase/client.ts
+import { createBrowserClient } from '@supabase/ssr';
+import type { Database } from '@/types/database';
+
+export const createClient = () =>
+  createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+// lib/supabase/server.ts
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import type { Database } from '@/types/database';
+
+export const createClient = () => {
+  const cookieStore = cookies();
+
+  return createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // SSR에서 쿠키 설정 실패 시 무시
+          }
+        },
+      },
+    }
+  );
+};
+```
+
+### 7.3 Tailwind CSS 설정
+```javascript
+// tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './src/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        // Apple 스타일 컬러 팔레트
+        'apple-blue': '#007AFF',
+        'apple-gray': '#F2F2F7',
+        'apple-green': '#34C759',
+        'apple-red': '#FF3B30',
+      },
+      fontFamily: {
+        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+      },
+    },
+  },
+  plugins: [],
+};
+```
+
+## 8. 성능 최적화
+
+### 8.1 데이터베이스 최적화
+- **인덱스 활용**: 자주 조회되는 컬럼에 인덱스 생성
+- **쿼리 최적화**: JOIN 쿼리 최소화, 필요한 컬럼만 SELECT
+- **Connection Pooling**: Supabase 자동 관리
+
+### 8.2 프론트엔드 최적화
+```typescript
+// React.memo 사용 - 불필요한 리렌더링 방지
+const RoomCard = React.memo(function RoomCard({ room, onSelect }: RoomCardProps) {
+  return <div onClick={() => onSelect(room)}>{room.name}</div>;
+});
+
+// useMemo/useCallback 사용 - 계산 비용 최적화
+const timeSlots = useMemo(() => generateTimeSlots(), []);
+const handleRoomSelect = useCallback((room: Room) => {
+  setSelectedRoom(room);
+}, []);
+```
+
+## 9. 보안 고려사항
+
+### 9.1 데이터 보안
+- **RLS 비활성화**: 단순한 구조 유지 (요구사항)
+- **입력 검증**: 클라이언트/서버 양쪽 검증
+- **SQL Injection 방지**: Parameterized Query 사용
+
+### 9.2 클라이언트 보안
+```typescript
+// Zod를 활용한 입력 데이터 검증
+import { z } from 'zod';
+
+const reservationSchema = z.object({
+  reserver_name: z.string().min(1, '예약자 이름을 입력해주세요'),
+  reserver_phone: z.string().regex(/^010-\d{4}-\d{4}$/, '올바른 휴대폰번호를 입력해주세요'),
+  reserver_password: z.string().min(4, '비밀번호는 4자리 이상 입력해주세요'),
+  reservation_date: z.string(),
+  start_time: z.string(),
+  end_time: z.string(),
+});
+
+export type ReservationFormData = z.infer<typeof reservationSchema>;
+
+export function validateReservationData(data: unknown): ReservationFormData {
+  return reservationSchema.parse(data);
+}
+```
+
+## 10. 테스트 전략
+
+### 10.1 단위 테스트
+```typescript
+// __tests__/services/roomService.test.ts
+import { roomService } from '@/lib/services/roomService';
+
+describe('roomService', () => {
+  test('should create room successfully', async () => {
+    const roomData: CreateRoomData = {
+      name: 'Test Room',
+      location: 'Test Location', 
+      capacity: 6
+    };
+    
+    const result = await roomService.createRoom(roomData);
+    expect(result.success).toBe(true);
+    expect(result.data?.name).toBe('Test Room');
+  });
+  
+  test('should handle duplicate room names', async () => {
+    const roomData: CreateRoomData = {
+      name: 'Duplicate Room',
+      location: 'Test Location',
+      capacity: 4
+    };
+    
+    await roomService.createRoom(roomData);
+    const result = await roomService.createRoom(roomData);
+    
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('already exists');
+  });
+});
+```
+
+## 11. 배포 설정
+
+### 11.1 Vercel 배포 설정
+```json
+// vercel.json
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "env": {
+    "NEXT_PUBLIC_SUPABASE_URL": "@supabase-url",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase-anon-key"
+  }
+}
+```
+
+### 11.2 GitHub Actions (선택적)
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to Vercel
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test
+```
+
+## 12. 모니터링 및 로깅
+
+### 12.1 에러 추적
+```typescript
+// 에러 처리 패턴
+try {
+  const result = await reservationService.createReservation(data);
+  return result;
+} catch (error) {
+  console.error('Reservation creation failed:', error);
+  
+  // 프로덕션에서는 외부 모니터링 서비스 사용
+  if (process.env.NODE_ENV === 'production') {
+    // Sentry, LogRocket 등
+  }
+  
+  throw new Error('예약 생성에 실패했습니다');
+}
+```
+
+### 12.2 성능 모니터링
+```typescript
+// 성능 측정
+const startTime = performance.now();
+await someAsyncOperation();
+const duration = performance.now() - startTime;
+
+if (duration > 1000) {
+  console.warn(`Slow operation detected: ${duration}ms`);
+}
+```
+
+이 기술 문서는 TypeScript와 App Router를 기반으로 한 안정적이고 확장 가능한 회의실 관리 시스템 구현을 위한 기술적 가이드라인을 제공합니다.

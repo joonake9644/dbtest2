@@ -1,100 +1,154 @@
 ---
-description: 
+description: Simplified TDD for Meeting Room System MVP
 globs: 
 alwaysApply: true
 ---
 
-# TDD Process Guidelines - Cursor Rules
+# 회의실 관리 시스템 테스트 전략
 
-## ⚠️ MANDATORY: Follow these rules for EVERY implementation and modification
+## 📌 MVP에 적합한 실용적 테스트 접근법
 
-**This document defines the REQUIRED process for all code changes. No exceptions without explicit team approval.**
+**초보 개발자를 위한 점진적 테스트 전략 - TDD 완전 적용 대신 실용적 접근**
 
-## Core Cycle: Red → Green → Refactor
+## 테스트 우선순위 (중요도 순)
 
-### 1. RED Phase
-- Write a failing test FIRST
-- Test the simplest scenario
-- Verify test fails for the right reason
-- One test at a time
-
-### 2. GREEN Phase  
-- Write MINIMAL code to pass
-- "Fake it till you make it" is OK
-- No premature optimization
-- YAGNI principle
-
-### 3. REFACTOR Phase
-- Remove duplication
-- Improve naming
-- Simplify structure
-- Keep tests passing
-
-## Test Quality: FIRST Principles
-- **Fast**: Milliseconds, not seconds
-- **Independent**: No shared state
-- **Repeatable**: Same result every time
-- **Self-validating**: Pass/fail, no manual checks
-- **Timely**: Written just before code
-
-## Test Structure: AAA Pattern
+### 1. 수동 테스트 (필수 - 100%)
 ```
-// Arrange
-Set up test data and dependencies
-
-// Act
-Execute the function/method
-
-// Assert
-Verify expected outcome
+✅ 브라우저에서 직접 기능 확인
+✅ 다양한 시나리오 클릭 테스트
+✅ 에러 상황 재현 테스트
 ```
 
-## Implementation Flow
-1. **List scenarios** before coding
-2. **Pick one scenario** → Write test
-3. **Run test** → See it fail (Red)
-4. **Implement** → Make it pass (Green)
-5. **Refactor** → Clean up (Still Green)
-6. **Commit** → Small, frequent commits
-7. **Repeat** → Next scenario
+### 2. 핵심 로직 단위 테스트 (권장 - 30%)
+```
+✅ 예약 시간 중복 검증 함수
+✅ 날짜/시간 유효성 검증 함수
+✅ 폼 데이터 검증 함수
+```
 
-## Test Pyramid Strategy
-- **Unit Tests** (70%): Fast, isolated, numerous
-- **Integration Tests** (20%): Module boundaries
-- **Acceptance Tests** (10%): User scenarios
+### 3. 통합 테스트 (선택적 - 10%)
+```
+⚪ Supabase 연동 테스트 (나중에)
+⚪ API 호출 테스트 (나중에)
+```
 
-## Outside-In vs Inside-Out
-- **Outside-In**: Start with user-facing test → Mock internals → Implement details
-- **Inside-Out**: Start with core logic → Build outward → Integrate components
+## 실용적 개발 흐름
 
-## Common Anti-patterns to Avoid
-- Testing implementation details
-- Fragile tests tied to internals  
-- Missing assertions
-- Slow, environment-dependent tests
-- Ignored failing tests
+### Phase 1: 기능 구현 우선
+1. **기능 구현** → 브라우저 테스트
+2. **수정** → 재테스트  
+3. **동작 확인** → 다음 기능
 
-## When Tests Fail
-1. **Identify**: Regression, flaky test, or spec change?
-2. **Isolate**: Narrow down the cause
-3. **Fix**: Code bug or test bug
-4. **Learn**: Add missing test cases
+### Phase 2: 안정화 (기능 완료 후)
+1. **핵심 로직** → 단위 테스트 추가
+2. **버그 발견** → 테스트 케이스 추가
+3. **리팩토링** → 테스트로 안전성 확보
 
-## Team Practices
-- CI/CD integration mandatory
-- No merge without tests
-- Test code = Production code quality
-- Pair programming for complex tests
-- Regular test refactoring
+## 회의실 시스템 테스트 체크리스트
 
-## Pragmatic Exceptions
-- UI/Graphics: Manual + snapshot tests
-- Performance: Benchmark suites
-- Exploratory: Spike then test
-- Legacy: Test on change
+### 사용자 기능 수동 테스트
+```
+예약 현황 조회:
+□ 모든 회의실이 표시되는가?
+□ 예약된 시간이 정확히 표시되는가?
+□ 실시간 업데이트가 되는가?
 
-## Remember
-- Tests are living documentation
-- Test behavior, not implementation
-- Small steps, fast feedback
-- When in doubt, write a test
+예약 생성:
+□ 필수 필드 입력 시 예약 가능한가?
+□ 중복 시간 예약 시 에러 메시지가 나오는가?
+□ 성공 시 현황이 즉시 업데이트되는가?
+
+내 예약 조회:
+□ 올바른 휴대폰번호/비밀번호로 조회되는가?
+□ 잘못된 정보 입력 시 적절한 에러 메시지가 나오는가?
+□ 예약 취소가 정상 동작하는가?
+```
+
+### 관리자 기능 수동 테스트
+```
+회의실 관리:
+□ 새 회의실 등록이 가능한가?
+□ 중복 이름 입력 시 에러가 나오는가?
+□ 회의실 수정이 정상 동작하는가?
+□ 예약이 있는 회의실 삭제 시 경고가 나오는가?
+```
+
+## 단위 테스트 대상 (핵심만)
+
+### 1. 시간 검증 함수
+```javascript
+// lib/utils/timeValidation.js
+export function isTimeConflict(existingReservations, newReservation) {
+  // 테스트할 핵심 로직
+}
+
+// __tests__/timeValidation.test.js
+describe('시간 중복 검증', () => {
+  test('기존 예약과 겹치는 시간 감지', () => {
+    // 간단한 테스트 케이스
+  });
+});
+```
+
+### 2. 폼 검증 함수
+```javascript
+// lib/utils/validation.js
+export function validateReservationForm(data) {
+  // 테스트할 유효성 검증 로직
+}
+
+// __tests__/validation.test.js  
+describe('예약 폼 검증', () => {
+  test('필수 필드 누락 시 에러 반환', () => {
+    // 기본적인 검증 테스트
+  });
+});
+```
+
+## 테스트 작성 시점
+
+### 초기 개발 (1-2주차)
+- **테스트 없이 기능 구현 집중**
+- 브라우저 수동 테스트만 수행
+- 기본 기능 동작 확인
+
+### 중기 개발 (3주차)
+- **핵심 함수에 단위 테스트 추가**
+- 버그 발견 시 테스트 케이스 추가
+- 리팩토링 전 안전망 구성
+
+### 완성 후
+- 추가 기능 개발 시 TDD 적용 고려
+- 복잡한 로직에 대한 테스트 보강
+
+## 테스트 도구 설정 (필요시)
+
+```bash
+# 기본 테스트 환경 (선택적)
+npm install --save-dev jest @testing-library/react @testing-library/jest-dom
+```
+
+## 에러 상황 테스트 우선순위
+
+### High Priority (반드시 테스트)
+- 잘못된 사용자 입력
+- 네트워크 연결 끊김
+- 중복 예약 시도
+
+### Medium Priority (가능하면 테스트)  
+- 동시 접속 상황
+- 큰 데이터량 처리
+
+### Low Priority (나중에)
+- 성능 테스트
+- 보안 테스트
+
+## 실용적 조언
+
+1. **완벽한 테스트보다 동작하는 기능**
+2. **복잡한 테스트 프레임워크보다 간단한 확인**
+3. **사용자 관점에서 테스트**
+4. **버그 발견 즉시 재현 방법 문서화**
+
+MVP 단계에서는 테스트 커버리지보다 **기능 완성도**에 집중하고, 
+안정화 단계에서 점진적으로 테스트를 보강하는 것이 현실적입니다.

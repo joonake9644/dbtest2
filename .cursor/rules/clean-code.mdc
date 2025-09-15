@@ -1,109 +1,271 @@
 ---
-description: 
+description: Clean Code Guidelines for Meeting Room System
 globs: 
 alwaysApply: true
 ---
 
-# Clean Code Guidelines
+# 회의실 관리 시스템 클린 코드 가이드라인
 
-You are an expert software engineer focused on writing clean, maintainable code. Follow these principles rigorously:
+## 회의실 프로젝트에 특화된 실용적 클린 코드 원칙
 
-## Core Principles
-- **DRY** - Eliminate duplication ruthlessly
-- **KISS** - Simplest solution that works
-- **YAGNI** - Build only what's needed now
-- **SOLID** - Apply all five principles consistently
-- **Boy Scout Rule** - Leave code cleaner than found
+### 핵심 원칙 (MVP 집중)
+- **가독성 우선**: 복잡한 추상화보다 읽기 쉬운 코드
+- **단순함**: DRY보다는 명확함 우선
+- **실용성**: 이론적 완벽함보다 동작하는 코드
+- **점진적 개선**: 기능 완성 후 리팩토링
 
-## Naming Conventions
-- Use **intention-revealing** names
-- Avoid abbreviations except well-known ones (e.g., URL, API)
-- Classes: **nouns**, Methods: **verbs**, Booleans: **is/has/can** prefix
-- Constants: UPPER_SNAKE_CASE
-- No magic numbers - use named constants
+## 네이밍 컨벤션
 
-## Functions & Methods
-- **Single Responsibility** - one reason to change
-- Maximum 20 lines (prefer under 10)
-- Maximum 3 parameters (use objects for more)
-- No side effects in pure functions
-- Early returns over nested conditions
+### 회의실 시스템 도메인 용어
+```javascript
+// 좋은 예시 - 도메인 용어 사용
+const meetingRoom = { id, name, location, capacity };
+const reservation = { roomId, date, startTime, endTime };
+const reserverInfo = { name, phone, password };
 
-## Code Structure
-- **Cyclomatic complexity** < 10
-- Maximum nesting depth: 3 levels
-- Organize by feature, not by type
-- Dependencies point inward (Clean Architecture)
-- Interfaces over implementations
+// 나쁜 예시 - 일반적 용어
+const data = { id, name, place, size };
+const booking = { room, when, from, to };
+const user = { name, contact, auth };
+```
 
-## Comments & Documentation
-- Code should be self-documenting
-- Comments explain **why**, not what
-- Update comments with code changes
-- Delete commented-out code immediately
-- Document public APIs thoroughly
+### 함수명은 동작을 명확히
+```javascript
+// 좋은 예시
+function createReservation(reservationData) { }
+function checkTimeConflict(roomId, date, timeRange) { }
+function getMyReservations(phone, password) { }
+function validateReservationForm(formData) { }
 
-## Error Handling
-- Fail fast with clear messages
-- Use exceptions over error codes
-- Handle errors at appropriate levels
-- Never catch generic exceptions
-- Log errors with context
+// 나쁜 예시  
+function processData(data) { }
+function handleSubmit(values) { }
+function doCheck(params) { }
+```
 
-## Testing
-- **TDD** when possible
-- Test behavior, not implementation
-- One assertion per test
-- Descriptive test names: `should_X_when_Y`
-- **AAA pattern**: Arrange, Act, Assert
-- Maintain test coverage > 80%
+## 함수 작성 규칙 (회의실 시스템용)
 
-## Performance & Optimization
-- Profile before optimizing
-- Optimize algorithms before micro-optimizations
-- Cache expensive operations
-- Lazy load when appropriate
-- Avoid premature optimization
+### 단일 책임 원칙
+```javascript
+// 좋은 예시 - 하나의 책임
+function isTimeSlotAvailable(roomId, date, startTime, endTime) {
+  // 시간 중복 검사만 담당
+}
 
-## Security
-- Never trust user input
-- Sanitize all inputs
-- Use parameterized queries
-- Follow **principle of least privilege**
-- Keep dependencies updated
-- No secrets in code
+function saveReservation(reservationData) {
+  // 예약 저장만 담당  
+}
 
-## Version Control
-- Atomic commits - one logical change
-- Imperative mood commit messages
-- Reference issue numbers
-- Branch names: `type/description`
-- Rebase feature branches before merging
+// 나쁜 예시 - 여러 책임
+function createReservationAndUpdateUI(data, setReservations) {
+  // 비즈니스 로직 + UI 업데이트
+}
+```
 
-## Code Reviews
-- Review for correctness first
-- Check edge cases
-- Verify naming clarity
-- Ensure consistent style
-- Suggest improvements constructively
+### 함수 크기 제한
+- **10줄 이내** 권장 (최대 20줄)
+- 중첩 if문 최대 2단계
+- 매개변수 최대 3개 (객체 사용 권장)
 
-## Refactoring Triggers
-- Duplicate code (Rule of Three)
-- Long methods/classes
-- Feature envy
-- Data clumps
-- Divergent change
-- Shotgun surgery
+```javascript
+// 좋은 예시
+function validateReservationData({ name, phone, date, startTime, endTime }) {
+  const errors = {};
+  
+  if (!name?.trim()) errors.name = '이름을 입력해주세요';
+  if (!isValidPhone(phone)) errors.phone = '올바른 휴대폰번호를 입력해주세요';
+  if (!isValidTimeRange(startTime, endTime)) errors.time = '시간을 확인해주세요';
+  
+  return errors;
+}
+```
 
-## Final Checklist
-Before committing, ensure:
-- [ ] All tests pass
-- [ ] No linting errors
-- [ ] No console logs
-- [ ] No commented code
-- [ ] No TODOs without tickets
-- [ ] Performance acceptable
-- [ ] Security considered
-- [ ] Documentation updated
+## 컴포넌트 구조 (React 특화)
 
-Remember: **Clean code reads like well-written prose**. Optimize for readability and maintainability over cleverness.
+### 컴포넌트 분리 기준
+```javascript
+// 1. 화면별 컴포넌트 (pages)
+function ReservationOverviewPage() { }
+function MyReservationsPage() { }
+function AdminPage() { }
+
+// 2. 기능별 컴포넌트 (features)  
+function ReservationForm() { }
+function RoomList() { }
+function ReservationCard() { }
+
+// 3. 재사용 컴포넌트 (common)
+function Modal() { }
+function LoadingSpinner() { }
+function ErrorMessage() { }
+```
+
+### Props 네이밍
+```javascript
+// 좋은 예시 - 명확한 의도
+interface ReservationFormProps {
+  selectedRoom: Room;
+  selectedDate: Date;
+  onReservationCreate: (reservation: Reservation) => void;
+  onCancel: () => void;
+}
+
+// 나쁜 예시 - 모호한 의도
+interface FormProps {
+  data: any;
+  onSubmit: (data: any) => void;
+  onClose: () => void;
+}
+```
+
+## 에러 처리 패턴
+
+### 회의실 시스템 에러 처리
+```javascript
+// 서비스 레이어에서 에러 처리
+async function createReservation(reservationData) {
+  try {
+    const { data, error } = await supabase
+      .from('reservations')
+      .insert(reservationData);
+      
+    if (error) {
+      throw new Error(`예약 생성 실패: ${error.message}`);
+    }
+    
+    return { success: true, data };
+  } catch (error) {
+    console.error('Reservation creation failed:', error);
+    return { 
+      success: false, 
+      error: error.message || '예약 생성 중 오류가 발생했습니다' 
+    };
+  }
+}
+
+// 컴포넌트에서 에러 처리
+function ReservationForm() {
+  const [error, setError] = useState('');
+  
+  const handleSubmit = async (formData) => {
+    const result = await createReservation(formData);
+    
+    if (!result.success) {
+      setError(result.error);
+      return;
+    }
+    
+    // 성공 처리
+  };
+}
+```
+
+## 코드 구조화
+
+### 파일 내부 구조 순서
+```javascript
+// 1. imports
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+
+// 2. types/interfaces (TypeScript 사용시)
+interface ReservationData {
+  roomId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}
+
+// 3. constants
+const TIME_SLOTS = ['09:00', '10:00', '11:00', '12:00'];
+
+// 4. main component
+export default function ReservationForm() {
+  // state
+  const [reservations, setReservations] = useState([]);
+  
+  // effects
+  useEffect(() => {
+    loadReservations();
+  }, []);
+  
+  // handlers
+  const handleSubmit = async (data) => {
+    // 구현
+  };
+  
+  // render
+  return (
+    // JSX
+  );
+}
+
+// 5. helper functions (if needed)
+function isValidTimeSlot(time) {
+  return TIME_SLOTS.includes(time);
+}
+```
+
+## 주석 및 문서화
+
+### 언제 주석을 작성할까
+```javascript
+// 좋은 주석 - 비즈니스 로직 설명
+function checkTimeConflict(existingReservations, newReservation) {
+  // 동일 회의실, 동일 날짜에서 시간 겹침 확인
+  // GIST 제약조건과 동일한 로직을 클라이언트에서도 검증
+  return existingReservations.some(existing => 
+    existing.roomId === newReservation.roomId &&
+    existing.date === newReservation.date &&
+    timeRangesOverlap(existing, newReservation)
+  );
+}
+
+// 나쁜 주석 - 코드 중복 설명
+function validatePhone(phone) {
+  // 휴대폰번호가 비어있는지 확인
+  if (!phone) return false;
+  // 정규식으로 형식 확인  
+  return /^010-\d{4}-\d{4}$/.test(phone);
+}
+```
+
+## 성능 고려사항 (MVP용)
+
+### 최소한의 최적화
+```javascript
+// React.memo 사용 - 불필요한 리렌더링 방지
+const RoomCard = React.memo(function RoomCard({ room, onSelect }) {
+  return <div onClick={() => onSelect(room)}>{room.name}</div>;
+});
+
+// useCallback 사용 - 핸들러 함수 최적화
+const handleRoomSelect = useCallback((room) => {
+  setSelectedRoom(room);
+}, []);
+```
+
+## 실용적 리팩토링 규칙
+
+### 리팩토링 시점
+1. **같은 코드 3번 반복** → 함수로 추출
+2. **컴포넌트 100줄 초과** → 분리 고려
+3. **함수 20줄 초과** → 분리 고려
+4. **중복 UI 패턴** → 공통 컴포넌트화
+
+### 리팩토링 우선순위
+1. **가독성 개선** (네이밍, 구조)
+2. **중복 제거** (함수, 컴포넌트)
+3. **에러 처리 강화**
+4. **성능 최적화** (필요시)
+
+## 최종 체크리스트
+
+코드 작성 후 확인사항:
+- [ ] 함수/변수명이 의도를 명확히 표현하는가?
+- [ ] 함수가 하나의 책임만 가지는가?
+- [ ] 에러 상황이 적절히 처리되는가?
+- [ ] 사용자에게 명확한 피드백을 제공하는가?
+- [ ] 코드가 회의실 도메인을 정확히 반영하는가?
+
+**기억하세요**: 완벽한 코드보다는 **읽기 쉽고 동작하는 코드**가 우선입니다.

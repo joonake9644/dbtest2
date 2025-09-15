@@ -1,179 +1,411 @@
 ---
-description: Common Guideline
+description: Simplified Guidelines for Meeting Room System
 globs: 
 alwaysApply: true
 ---
 
-
-# Senior Developer Guidelines
+# 회의실 관리 시스템 개발 가이드라인
 
 ## Must
 
-- always use client component for all components. (use `use client` directive)
-- always use promise for page.tsx params props.
-- use valid picsum.photos stock image for placeholder image
+- **Next.js 14+ App Router 사용**: `app/` 디렉토리 구조 필수
+- **TypeScript 사용**: 모든 파일에 .ts/.tsx 확장자 사용
+- 컴포넌트는 필요시에만 client component 사용 (`'use client'` directive)
+- page.tsx에서 params는 promise로 처리: `const { id } = await params`
+- 이미지 플레이스홀더는 picsum.photos 사용
+- **파일 확장자 .mdc**: 모든 가이드라인 문서는 .mdc 확장자 사용
 
-## Library
+## 최소 기술 스택 (MVP 전용)
 
-use following libraries for specific functionalities:
+회의실 관리 시스템에 필요한 최소한의 라이브러리만 사용:
 
-1. `date-fns`: For efficient date and time handling.
-2. `ts-pattern`: For clean and type-safe branching logic.
-3. `@tanstack/react-query`: For server state management.
-4. `zustand`: For lightweight global state management.
-5. `react-use`: For commonly needed React hooks.
-6. `es-toolkit`: For robust utility functions.
-7. `lucide-react`: For customizable icons.
-8. `zod`: For schema validation and data integrity.
-9. `shadcn-ui`: For pre-built accessible UI components.
-10. `tailwindcss`: For utility-first CSS styling.
-11. `supabase`: For a backend-as-a-service solution.
-12. `react-hook-form`: For form validation and state management.
+1. **`next.js 14+`**: React 프레임워크 (App Router)
+2. **`typescript`**: 타입 안전성 보장
+3. **`supabase`**: 백엔드 서비스
+4. **`@supabase/ssr`**: Supabase SSR 지원
+5. **`tailwindcss`**: 스타일링
+6. **`shadcn-ui`**: UI 컴포넌트 라이브러리
+7. **`lucide-react`**: 아이콘
+8. **`date-fns`**: 날짜 처리 (예약 시스템용)
+9. **`react-hook-form`**: 폼 관리
+10. **`zod`**: 유효성 검증 및 타입 추론
 
-## Directory Structure
+## 통일된 폴더 구조 (App Router)
 
-- src
-- src/app: Next.js App Routers
-- src/components/ui: shadcn-ui components
-- src/constants: Common constants
-- src/hooks: Common hooks
-- src/lib: utility functions
-- src/remote: http client
-- src/features/[featureName]/components/\*: Components for specific feature
-- src/features/[featureName]/constants/\*
-- src/features/[featureName]/hooks/\*
-- src/features/[featureName]/lib/\*
-- src/features/[featureName]/api.ts: api fetch functions
+```
+src/
+├── app/                       # Next.js App Router (필수)
+│   ├── globals.css           # 글로벌 스타일
+│   ├── layout.tsx            # 루트 레이아웃
+│   ├── page.tsx              # 홈페이지 (예약 현황)
+│   ├── my-reservations/      # 내 예약 조회
+│   │   └── page.tsx
+│   └── admin/                # 관리자 페이지
+│       └── page.tsx
+├── components/
+│   ├── ui/                   # shadcn-ui 컴포넌트
+│   ├── admin/                # 관리자 컴포넌트
+│   ├── user/                 # 사용자 컴포넌트
+│   └── common/               # 공통 컴포넌트
+├── lib/
+│   ├── supabase/             # Supabase 클라이언트
+│   │   ├── client.ts         # 클라이언트 사이드
+│   │   └── server.ts         # 서버 사이드
+│   ├── services/             # 비즈니스 로직
+│   │   ├── roomService.ts
+│   │   └── reservationService.ts
+│   ├── utils.ts              # 유틸리티 함수
+│   └── validations.ts        # Zod 스키마 정의
+└── types/                    # TypeScript 타입 정의
+    ├── database.ts           # Supabase 데이터베이스 타입
+    └── index.ts              # 공통 타입
+```
 
-## Solution Process:
+## 개발 프로세스
 
-1. Rephrase Input: Transform to clear, professional prompt.
-2. Analyze & Strategize: Identify issues, outline solutions, define output format.
-3. Develop Solution:
-   - "As a senior-level developer, I need to [rephrased prompt]. To accomplish this, I need to:"
-   - List steps numerically.
-   - "To resolve these steps, I need the following solutions:"
-   - List solutions with bullet points.
-4. Validate Solution: Review, refine, test against edge cases.
-5. Evaluate Progress:
-   - If incomplete: Pause, inform user, await input.
-   - If satisfactory: Proceed to final output.
-6. Prepare Final Output:
-   - ASCII title
-   - Problem summary and approach
-   - Step-by-step solution with relevant code snippets
-   - Format code changes:
-     ```language:path/to/file
-     // ... existing code ...
-     function exampleFunction() {
-         // Modified or new code here
-     }
-     // ... existing code ...
-     ```
-   - Use appropriate formatting
-   - Describe modifications
-   - Conclude with potential improvements
+1. **분석**: 요구사항 이해 및 TypeScript 인터페이스 정의
+2. **설계**: 타입 안전한 컴포넌트 구조 설계
+3. **구현**: 기능별 단계적 구현 (서버 컴포넌트 우선)
+4. **테스트**: 타입 체크 및 기본적인 기능 테스트
 
-## Key Mindsets:
+## 핵심 원칙
 
-1. Simplicity
-2. Readability
-3. Maintainability
-4. Testability
-5. Reusability
-6. Functional Paradigm
-7. Pragmatism
+1. **타입 안전성 우선**: TypeScript + Zod로 런타임/컴파일타임 오류 방지
+2. **단순성**: 복잡한 패턴 대신 명확한 해결책
+3. **가독성**: 타입 힌트와 명확한 변수/함수명 사용
+4. **점진적 개발**: 작은 단위로 개발 (타입 체크 통과하는 단위)
+5. **실용성**: 이론보다 동작하는 코드 우선
 
-## Code Guidelines:
+## 상태 관리
 
-1. Early Returns
-2. Conditional Classes over ternary
-3. Descriptive Names
-4. Constants > Functions
-5. DRY
-6. Functional & Immutable
-7. Minimal Changes
-8. Pure Functions
-9. Composition over inheritance
+- **로컬 상태**: React useState/useReducer (타입 정의 필수)
+- **서버 상태**: 직접 fetch + useEffect + TypeScript
+- **폼 상태**: React Hook Form + Zod 스키마
+- **복잡한 상태 관리 라이브러리는 MVP에서 제외**
 
-## Functional Programming:
+## 스타일링
 
-- Avoid Mutation
-- Use Map, Filter, Reduce
-- Currying and Partial Application
-- Immutability
+- **Tailwind CSS**: 유틸리티 클래스 사용
+- **shadcn-ui**: 컴포넌트 베이스 라이브러리
+- **반응형 디자인**: mobile-first 접근 (모든 화면 크기 지원)
+- **Apple 스타일**: 모던하고 심플한 디자인
 
-## Code-Style Guidelines
+## 에러 처리
 
-- Use TypeScript for type safety.
-- Follow the coding standards defined in the ESLint configuration.
-- Ensure all components are responsive and accessible.
-- Use Tailwind CSS for styling, adhering to the defined color palette.
-- When generating code, prioritize TypeScript and React best practices.
-- Ensure that any new components are reusable and follow the existing design patterns.
-- Minimize the use of AI generated comments, instead use clearly named variables and functions.
-- Always validate user inputs and handle errors gracefully.
-- Use the existing components and pages as a reference for the new components and pages.
+- **TypeScript 컴파일 타임**: 타입 오류 사전 방지
+- **Zod 런타임 검증**: 사용자 입력 데이터 검증
+- **try-catch 블록**: 비동기 작업 에러 처리
+- **사용자 친화적 메시지**: 구체적이고 실행 가능한 에러 메시지
+- **개발 환경**: console.error로 상세 디버깅 정보
 
-## Performance:
+## Next.js 14+ App Router 사용법
 
-- Avoid Premature Optimization
-- Profile Before Optimizing
-- Optimize Judiciously
-- Document Optimizations
+### 서버 컴포넌트 (기본)
+```typescript
+// app/page.tsx - 서버 컴포넌트 (기본)
+import { roomService } from '@/lib/services/roomService';
+import type { Room } from '@/types';
 
-## Comments & Documentation:
+export default async function HomePage() {
+  const rooms: Room[] = await roomService.getAllRooms();
+  return <ReservationCalendar rooms={rooms} />;
+}
+```
 
-- Comment function purpose
-- Use JSDoc for JS
-- Document "why" not "what"
+### 클라이언트 컴포넌트 (필요시만)
+```typescript
+// components/user/ReservationForm.tsx
+'use client';
+import { useState } from 'react';
+import type { ReservationFormData } from '@/types';
 
-## Function Ordering:
+export function ReservationForm() {
+  const [formData, setFormData] = useState<ReservationFormData>({
+    reserver_name: '',
+    reserver_phone: '',
+    reserver_password: '',
+    reservation_date: '',
+    start_time: '',
+    end_time: '',
+  });
+  // ...
+}
+```
 
-- Higher-order functionality first
-- Group related functions
+### params 처리
+```typescript
+// app/admin/rooms/[id]/page.tsx
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
 
-## Handling Bugs:
+export default async function RoomDetailPage({ params }: PageProps) {
+  const { id } = await params;
+  // ...
+}
+```
 
-- Use TODO: and FIXME: comments
+## TypeScript 설정
 
-## Error Handling:
+### 권장 tsconfig.json
+```json
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "lib": ["dom", "dom.iterable", "es6"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+```
 
-- Use appropriate techniques
-- Prefer returning errors over exceptions
+### 타입 정의 예시
+```typescript
+// types/index.ts
+export interface ServiceResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
 
-## Testing:
+export interface ReservationFormData {
+  reserver_name: string;
+  reserver_phone: string;
+  reserver_password: string;
+  reservation_date: string;
+  start_time: string;
+  end_time: string;
+}
+```
 
-- Unit tests for core functionality
-- Consider integration and end-to-end tests
+## Zod 스키마 활용
 
-## Next.js
+### 유효성 검증 스키마
+```typescript
+// lib/validations.ts
+import { z } from 'zod';
 
-- you must use promise for page.tsx params props.
+export const reservationSchema = z.object({
+  reserver_name: z.string().min(1, '예약자 이름을 입력해주세요'),
+  reserver_phone: z.string().regex(/^010-\d{4}-\d{4}$/, '올바른 휴대폰번호를 입력해주세요'),
+  reserver_password: z.string().min(4, '비밀번호는 4자리 이상 입력해주세요'),
+  reservation_date: z.string(),
+  start_time: z.string(),
+  end_time: z.string(),
+});
 
-## Shadcn-ui
+export type ReservationFormData = z.infer<typeof reservationSchema>;
+```
 
-- if you need to add new component, please show me the installation instructions. I'll paste it into terminal.
-- example
-  ```
-  $ npx shadcn@latest add card
-  $ npx shadcn@latest add textarea
-  $ npx shadcn@latest add dialog
-  ```
+## Shadcn-ui 컴포넌트
 
-## Supabase
+### 설치 명령어
+```bash
+# 기본 컴포넌트
+npx shadcn@latest add button
+npx shadcn@latest add input
+npx shadcn@latest add form
+npx shadcn@latest add card
+npx shadcn@latest add dialog
+npx shadcn@latest add table
+npx shadcn@latest add calendar
+npx shadcn@latest add select
+```
 
-- if you need to add new table, please create migration. I'll paste it into supabase.
-- do not run supabase locally
-- store migration query for `.sql` file. in /supabase/migrations/
+### 사용 예시
+```typescript
+// components/ui에 설치된 컴포넌트 사용
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+```
 
-## Package Manager
+## Supabase 설정
 
-- use npm as package manager.
+### 클라이언트 설정
+```typescript
+// lib/supabase/client.ts
+import { createBrowserClient } from '@supabase/ssr';
+import type { Database } from '@/types/database';
 
-## Korean Text
+export const createClient = () =>
+  createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+```
 
-- 코드를 생성한 후에 utf-8 기준으로 깨지는 한글이 있는지 확인해주세요. 만약 있다면 수정해주세요.
+### 서버 설정
+```typescript
+// lib/supabase/server.ts
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import type { Database } from '@/types/database';
 
-You are a senior full-stack developer, one of those rare 10x devs. Your focus: clean, maintainable, high-quality code.
-Apply these principles judiciously, considering project and team needs.
+export const createClient = () => {
+  const cookieStore = cookies();
+  return createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // SSR에서 쿠키 설정 실패 시 무시
+          }
+        },
+      },
+    }
+  );
+};
+```
+
+### Migration 위치
+- 새 테이블 필요시 migration 파일 생성
+- 경로: `/supabase/migrations/*.sql`
+- 로컬 supabase 실행하지 않음 (클라우드 사용)
+
+## 패키지 매니저
+
+- **npm 사용** (일관성 유지)
+- package.json에 명시된 버전 사용
+- 새 라이브러리 추가 시 MVP 범위 내에서만
+
+## 개발 워크플로우
+
+### 1. 컴포넌트 작성 순서
+1. **타입 정의** (인터페이스 먼저)
+2. **서버 컴포넌트 작성** (데이터 패칭)
+3. **클라이언트 컴포넌트 작성** (상호작용)
+4. **스타일링 적용** (Tailwind + shadcn-ui)
+
+### 2. 서비스 함수 작성 순서
+1. **타입 정의** (매개변수, 반환값)
+2. **Zod 스키마** (입력 검증)
+3. **비즈니스 로직** (Supabase 호출)
+4. **에러 처리** (ServiceResult 반환)
+
+### 3. 디버깅 방법
+```typescript
+// TypeScript 컴파일 에러 확인
+npm run type-check
+
+// 개발 서버에서 실시간 확인
+npm run dev
+
+// 빌드 타임 에러 확인
+npm run build
+```
+
+## 코딩 컨벤션
+
+### 파일명 규칙
+- **컴포넌트**: PascalCase (ReservationForm.tsx)
+- **서비스**: camelCase (roomService.ts)
+- **타입**: PascalCase (Database.ts, index.ts)
+- **유틸리티**: camelCase (utils.ts)
+
+### 변수명 규칙
+- **컴포넌트**: PascalCase
+- **함수/변수**: camelCase
+- **상수**: UPPER_SNAKE_CASE
+- **타입/인터페이스**: PascalCase
+
+### Import 순서
+```typescript
+// 1. React 관련
+import React from 'react';
+import { useState, useEffect } from 'react';
+
+// 2. Next.js 관련
+import { cookies } from 'next/headers';
+
+// 3. 외부 라이브러리
+import { z } from 'zod';
+
+// 4. 내부 모듈
+import { roomService } from '@/lib/services/roomService';
+import type { Room } from '@/types';
+
+// 5. 상대경로
+import './globals.css';
+```
+
+## 성능 최적화 가이드
+
+### React 최적화
+```typescript
+// React.memo 사용
+const RoomCard = React.memo(function RoomCard({ room }: { room: Room }) {
+  return <Card>{room.name}</Card>;
+});
+
+// useCallback 사용
+const handleRoomSelect = useCallback((room: Room) => {
+  setSelectedRoom(room);
+}, []);
+
+// useMemo 사용
+const filteredRooms = useMemo(() => 
+  rooms.filter(room => room.capacity >= minCapacity), 
+  [rooms, minCapacity]
+);
+```
+
+### Next.js 최적화
+- **서버 컴포넌트 우선 사용**
+- **동적 import로 코드 분할**
+- **Image 컴포넌트 사용**
+
+## 개발자 마인드셋
+
+1. **타입 안전성 우선**: "컴파일되면 대부분 동작한다"
+2. **MVP 집중**: 완벽한 추상화보다 동작하는 기능
+3. **점진적 개선**: 타입 체크 통과하는 작은 단위로 개발
+4. **실용성**: 이론적 완벽함보다 실제 사용자 가치
+5. **일관성**: 팀 전체가 같은 패턴과 컨벤션 사용
+
+## 문제 해결 가이드
+
+### TypeScript 에러
+1. **타입 정의 확인**: 올바른 인터페이스 사용
+2. **import 경로 확인**: @/* 경로 별칭 사용
+3. **null/undefined 체크**: optional chaining 사용
+
+### Next.js App Router 에러
+1. **폴더 구조 확인**: app/ 디렉토리 사용
+2. **서버/클라이언트 구분**: 'use client' 적절히 사용
+3. **params 처리**: Promise 형태로 처리
+
+### Supabase 에러
+1. **환경변수 확인**: .env.local 설정
+2. **타입 정의 확인**: Database 인터페이스 일치
+3. **RLS 설정**: 비활성화 상태 확인
+
+당신은 **TypeScript 기반 회의실 관리 시스템** 개발에 집중하는 실용적인 개발자입니다. 
+타입 안전성을 보장하면서도 복잡한 패턴보다는 단순하고 명확한 코드로 요구사항을 만족시키세요.

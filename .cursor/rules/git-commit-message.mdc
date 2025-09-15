@@ -1,5 +1,5 @@
 ---
-description: 
+description: Git Commit Rules for Meeting Room System
 globs: 
 alwaysApply: true
 ---
@@ -28,9 +28,15 @@ alwaysApply: true
 - `build`: changes affecting build system
 - `revert`: reverting previous commit
 
-## Scope (Optional)
-- Component, file, or feature area affected
-- Use kebab-case: `user-auth`, `payment-api`
+## Scope (Optional) - Meeting Room System
+- `reservation`: 예약 관련 기능
+- `room`: 회의실 관리 기능
+- `admin`: 관리자 기능
+- `user`: 사용자 기능
+- `db`: 데이터베이스 스키마
+- `ui`: 사용자 인터페이스
+- `api`: API 엔드포인트
+- `auth`: 인증 관련
 - Omit if change affects multiple areas
 
 ## Description Rules
@@ -51,17 +57,27 @@ alwaysApply: true
 - `Closes #123` for issue references
 - `Co-authored-by: Name <email>`
 
-## Examples
+## Examples (Meeting Room System)
 ```
-feat(auth): add OAuth2 Google login
+feat(reservation): add time conflict validation
 
-fix: resolve memory leak in user session cleanup
+fix(room): resolve duplicate room name issue
 
-docs(api): update authentication endpoints
+feat(admin): implement room deletion with warning
 
-refactor(utils): extract validation helpers to separate module
+fix(user): correct phone number validation pattern
 
-BREAKING CHANGE: remove deprecated getUserData() method
+docs(db): update reservation schema documentation
+
+style(ui): improve reservation form layout
+
+refactor(api): extract room service functions
+
+chore(deps): update supabase client to v2.38.0
+
+feat(reservation): add real-time status updates
+
+BREAKING CHANGE: change reservation phone field format
 ```
 
 ## Workflow Integration
@@ -73,3 +89,4 @@ BREAKING CHANGE: remove deprecated getUserData() method
 - [ ] Imperative mood used
 - [ ] No trailing period
 - [ ] Meaningful and clear context
+- [ ] Scope matches meeting room domain (if applicable)
