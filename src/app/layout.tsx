@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import Providers from './providers';
+import Link from 'next/link';
+import Nav from '@/components/nav';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -25,10 +27,18 @@ export default function RootLayout({
 }>) {
   return (
     <html suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <Providers>{children}</Providers>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <Providers>
+          <header className="border-b bg-white">
+            <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
+              <Link href="/" className="font-semibold">회의실 예약</Link>
+              <Nav />
+            </div>
+          </header>
+          <main className="min-h-[calc(100dvh-3.5rem)] bg-background">
+            {children}
+          </main>
+        </Providers>
       </body>
     </html>
   );

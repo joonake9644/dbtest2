@@ -14,13 +14,20 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { generateTimeSlots, isOverlapping } from '@/lib/utils';
 import type { RoomWithReservations } from '@/types';
 import { getRoomsWithReservationsByDate } from '@/lib/services/rooms';
 import { createReservation } from '@/lib/services/reservations';
 import { createClient } from '@/lib/supabase/client';
 import { z } from 'zod';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 
 export default function Home() {
@@ -71,7 +78,7 @@ export default function Home() {
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
-      <header className="flex items-end justify-between gap-4">
+      <header className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">회의실 예약</h1>
           <p className="text-sm text-muted-foreground">날짜별 현황 확인 및 예약</p>
@@ -145,10 +152,13 @@ export default function Home() {
 
 const bookingSchema = z.object({
   start: z.string(),
-  end: z.string().refine((v, ctx) => v > (ctx.parent as any).start, { message: '종료 시간은 시작 시간보다 늦어야 합니다' }),
+  end: z.string(),
   reserver_name: z.string().min(1, '이름을 입력해 주세요'),
   reserver_phone: z.string().regex(/^010-\d{4}-\d{4}$/i, '전화번호 형식: 010-0000-0000'),
   reserver_password: z.string().min(4, '비밀번호는 4자 이상'),
+}).refine((data) => data.end > data.start, {
+  message: '종료 시간은 시작 시간보다 늦어야 합니다',
+  path: ['end'],
 });
 
 type BookingFormValues = z.infer<typeof bookingSchema>;
@@ -171,6 +181,7 @@ function BookingForm({
     watch,
     formState: { errors, isSubmitting },
     setValue,
+    control,
   } = useForm<BookingFormValues>({
     resolver: zodResolver(bookingSchema),
     defaultValues: {
@@ -186,7 +197,7 @@ function BookingForm({
   useEffect(() => {
     const next = nextSlot(start, timeSlots);
     if (watch('end') <= start) setValue('end', next);
-  }, [start]);
+  }, [start, timeSlots, watch, setValue]);
 
   const onSubmit = async (values: BookingFormValues) => {
     const overlap = busy.some((b) => isOverlapping(values.start, values.end, b.start, b.end));
@@ -212,19 +223,37 @@ function BookingForm({
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
           <Label>시작</Label>
-          <select className="border rounded px-2 py-1 w-full" {...register('start')}>
-            {timeSlots.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
+          <Controller
+            control={control}
+            name="start"
+            render={({ field }) => (
+              <Select onValueChange={field.onChange} value={field.value}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {timeSlots.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
         </div>
         <div className="space-y-1">
           <Label>종료</Label>
-          <select className="border rounded px-2 py-1 w-full" {...register('end')}>
-            {timeSlots.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
+          <Controller
+            control={control}
+            name="end"
+            render={({ field }) => (
+              <Select onValueChange={field.onChange} value={field.value}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {timeSlots.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
           {errors.end && <p className="text-xs text-red-600 mt-1">{errors.end.message}</p>}
         </div>
         <div className="space-y-1 col-span-2">

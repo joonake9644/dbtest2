@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 
 export default function AdminLoginPage() {
-  const [token, setToken] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,12 +18,12 @@ export default function AdminLoginPage() {
     const res = await fetch('/api/admin/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ username, password }),
     });
     setLoading(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      setError(j.error || '로그인 실패');
+      setError(j.error || '로그인에 실패했어요');
       return;
     }
     window.location.href = '/admin';
@@ -33,12 +34,18 @@ export default function AdminLoginPage() {
       <h1 className="text-2xl font-semibold mb-4">관리자 로그인</h1>
       <Card className="p-4 space-y-3">
         <div className="space-y-1">
-          <Label>관리자 토큰</Label>
-          <Input value={token} onChange={(e) => setToken(e.target.value)} type="password" />
+          <Label htmlFor="username">아이디</Label>
+          <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="password">비밀번호</Label>
+          <Input id="password" value={password} onChange={(e) => setPassword(e.target.value)} type="password" />
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end">
-          <Button onClick={login} disabled={loading}>{loading ? '로그인 중...' : '로그인'}</Button>
+          <Button onClick={login} disabled={loading}>
+            {loading ? '로그인 중…' : '로그인'}
+          </Button>
         </div>
       </Card>
     </div>

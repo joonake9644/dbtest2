@@ -1,0 +1,55 @@
+name: DB Validate
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  migrate-and-check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres" 
+          --health-interval=10s --health-timeout=5s --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U postgres && break || sleep 2;
+          done
+
+      - name: Apply migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          for f in $(ls -1 supabase/migrations/*.sql | sort); do
+            echo "Applying $f";
+            psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -f "$f";
+          done
+
+      - name: Sanity queries
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -c "\dt public.*";
+          psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -c "SELECT * FROM public.public_reservations LIMIT 1;" || true
+          psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -c "SELECT proname FROM pg_proc WHERE proname IN ('create_reservation','cancel_reservation','get_my_reservations');"
+

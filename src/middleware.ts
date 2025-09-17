@@ -4,8 +4,8 @@ import { NextResponse } from 'next/server';
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (pathname.startsWith('/admin') && !pathname.startsWith('/admin/login')) {
-    const token = req.cookies.get('admin_token')?.value;
-    if (!token) {
+    const session = req.cookies.get('admin_session')?.value;
+    if (!session) {
       const url = req.nextUrl.clone();
       url.pathname = '/admin/login';
       url.searchParams.set('next', pathname);
@@ -18,4 +18,3 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: ['/admin/:path*'],
 };
-

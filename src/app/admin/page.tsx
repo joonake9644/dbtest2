@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { createClient } from '@/lib/supabase/client';
 
 interface RoomForm { id?: string; name: string; location: string; capacity: number }
 
@@ -14,7 +15,7 @@ export default function AdminPage() {
   const [unauthorized, setUnauthorized] = useState(false);
   const [form, setForm] = useState<RoomForm>({ name: '', location: '', capacity: 4 });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     const res = await fetch('/api/admin/rooms');
     const json = await res.json();
@@ -25,9 +26,24 @@ export default function AdminPage() {
     }
     if (!res.ok) return alert(json.error || '불러오기 실패');
     setRooms(json.data);
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  // Realtime subscription
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('meeting_rooms:realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_rooms' }, () => {
+        load();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [load]);
 
   const submit = async () => {
     const method = form.id ? 'PUT' : 'POST';
@@ -63,20 +79,20 @@ export default function AdminPage() {
         <h2 className="font-medium">회의실 생성/수정</h2>
         <div className="grid md:grid-cols-3 gap-3">
           <div className="space-y-1">
-            <Label>이름</Label>
-            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <Label htmlFor="room-name">이름</Label>
+            <Input id="room-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <Label>위치</Label>
-            <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+            <Label htmlFor="room-location">위치</Label>
+            <Input id="room-location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <Label>수용 인원</Label>
-            <Input type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: Number(e.target.value || 0) })} />
+            <Label htmlFor="room-capacity">수용 인원</Label>
+            <Input id="room-capacity" type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: Number(e.target.value || 0) })} />
           </div>
         </div>
         <div className="flex gap-2">
-          <Button onClick={submit}>{form.id ? '수정' : '생성'}</Button>
+          <Button onClick={submit} data-testid="submit-button">{form.id ? '수정' : '생성'}</Button>
           {form.id && <Button variant="secondary" onClick={() => setForm({ name: '', location: '', capacity: 4 })}>취소</Button>}
         </div>
       </Card>
