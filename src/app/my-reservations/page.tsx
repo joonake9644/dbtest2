@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { cancelReservation } from '@/lib/services/reservations';
+import { cancelReservation, getMyReservations } from '@/lib/services/reservations';
+import { getRooms } from '@/lib/services/rooms';
 import type { Reservation } from '@/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -32,21 +33,51 @@ export default function MyReservationsPage() {
   // No initial rooms load — API returns merged room info in one call.
 
   const fetchList = async () => {
+    const trimmedPhone = phone.trim();
+    const trimmedPassword = password.trim();
+
+    if (trimmedPhone !== phone) setPhone(trimmedPhone);
+    if (trimmedPassword !== password) setPassword(trimmedPassword);
+
+    if (!trimmedPhone || !trimmedPassword) {
+      toast({ description: '전화번호와 비밀번호를 입력해주세요.', variant: 'destructive' });
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await fetch('/api/my-reservations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password }),
-      }).then((r) => r.json());
-      if (res.error) throw new Error(res.error);
-      const data = (res.data ?? []) as MyReservation[];
+      const result = await getMyReservations(trimmedPhone, trimmedPassword);
+      if (!result.success) {
+        throw new Error(result.error ?? '예약 조회 중 오류가 발생했습니다.');
+      }
+
+      const rawList = (result.data ?? []) as MyReservation[];
       const map: Record<string, { name: string; location: string; capacity?: number }> = {};
-      data.forEach((r) => { if (r.room) map[r.room_id] = r.room; });
+
+      if (rawList.length) {
+        const roomIds = Array.from(new Set(rawList.map((r) => r.room_id).filter(Boolean)));
+        if (roomIds.length) {
+          const rooms = await getRooms();
+          rooms.forEach((room) => {
+            if (roomIds.includes(room.id)) {
+              map[room.id] = { name: room.name, location: room.location, capacity: room.capacity };
+            }
+          });
+        }
+      }
+
+      const merged = rawList.map((reservation) => ({
+        ...reservation,
+        room: map[reservation.room_id] ?? reservation.room ?? null,
+      }));
+
       setRoomMap(map);
-      setList(data);
+      setList(merged);
     } catch (e: any) {
-      toast({ description: e?.message ?? '예약 조회 중 오류', variant: 'destructive' });
+      console.error(e);
+      toast({ description: e?.message ?? '예약 조회 중 오류가 발생했습니다.', variant: 'destructive' });
+      setList([]);
+      setRoomMap({});
     } finally {
       setLoading(false);
       setQueried(true);

@@ -1,6 +1,29 @@
 import { createClient } from '@/lib/supabase/client';
 import type { CreateReservationData, ServiceResult, Reservation } from '@/types';
 
+
+function mapCreateReservationError(error: any): string {
+  const code = error?.code as string | undefined;
+  const message = error?.message ?? '';
+  const details = error?.details ?? '';
+  const hint = error?.hint ?? '';
+  const duplicateConflict = [
+    code === '23P01',
+    code === '23505',
+    /no_overlapping_reservations/i.test(message),
+    /overlap/i.test(message),
+    /overlap/i.test(details),
+    /conflict/i.test(details),
+    /conflict/i.test(hint),
+  ].some(Boolean);
+
+  if (duplicateConflict) {
+    return '선택하신 시간대에는 이미 예약이 있습니다.';
+  }
+
+  return message || '예약 처리 중 오류가 발생했습니다.';
+}
+
 export async function createReservation(
   data: CreateReservationData
 ): Promise<ServiceResult<string>> {
@@ -16,7 +39,7 @@ export async function createReservation(
   });
 
   if (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: mapCreateReservationError(error) };
   }
   return { success: true, data: row?.id ?? '' };
 }
