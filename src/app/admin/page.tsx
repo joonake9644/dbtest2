@@ -133,12 +133,12 @@ export default function AdminPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
+    <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold">관리자 - 회의실 관리</h1>
+        <h2 className="text-xl font-semibold">Room Management</h2>
         {!unauthorized && (
           <Button variant="secondary" onClick={logout}>
-            로그아웃
+            Logout
           </Button>
         )}
       </div>

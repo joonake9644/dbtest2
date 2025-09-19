@@ -219,6 +219,9 @@ function BookingForm({
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <SheetHeader>
         <SheetTitle>예약 생성</SheetTitle>
+        <p className="text-sm text-muted-foreground pt-2">
+          처음 예약하시는 경우, 입력하신 정보로 예약이 생성되고 앞으로 예약 조회 시 사용됩니다.
+        </p>
       </SheetHeader>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">

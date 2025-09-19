@@ -149,6 +149,11 @@ export default function MyReservationsPage() {
             <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
         </div>
+        <div className="text-sm text-right pr-1">
+          <Link href="/forgot-password" className="text-muted-foreground hover:underline">
+            비밀번호를 잊으셨나요?
+          </Link>
+        </div>
         <div className="grid sm:grid-cols-3 gap-3">
           <div className="space-y-1">
             <Label>상태</Label>
