@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
@@ -7,7 +7,24 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/client';
 
-interface RoomForm { id?: string; name: string; location: string; capacity: number }
+interface RoomForm {
+  id?: string;
+  name: string;
+  location: string;
+  capacity: number;
+}
+
+async function readJson<T = any>(res: Response): Promise<T | null> {
+  const text = await res.text();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('Invalid JSON response');
+  }
+}
 
 export default function AdminPage() {
   const [rooms, setRooms] = useState<any[]>([]);
@@ -17,20 +34,31 @@ export default function AdminPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch('/api/admin/rooms');
-    const json = await res.json();
-    setLoading(false);
-    if (res.status === 401) {
-      setUnauthorized(true);
-      return;
+    try {
+      const res = await fetch('/api/admin/rooms', { cache: 'no-store' });
+      const json = await readJson<{ data?: any[]; error?: any }>(res);
+      if (res.status === 401) {
+        setUnauthorized(true);
+        return;
+      }
+      if (!res.ok) {
+        alert((json as any)?.error || '회의실 목록을 불러오지 못했습니다.');
+        return;
+      }
+      setUnauthorized(false);
+      setRooms(Array.isArray(json?.data) ? json?.data : []);
+    } catch (error) {
+      console.error('Failed to load rooms', error);
+      alert('회의실 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.');
+    } finally {
+      setLoading(false);
     }
-    if (!res.ok) return alert(json.error || '불러오기 실패');
-    setRooms(json.data);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  // Realtime subscription
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
@@ -46,24 +74,50 @@ export default function AdminPage() {
   }, [load]);
 
   const submit = async () => {
-    const method = form.id ? 'PUT' : 'POST';
-    const res = await fetch('/api/admin/rooms', {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    const json = await res.json();
-    if (!res.ok) return alert(json.error || '저장 실패');
-    setForm({ name: '', location: '', capacity: 4 });
-    load();
+    try {
+      const method = form.id ? 'PUT' : 'POST';
+      const res = await fetch('/api/admin/rooms', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const json = await readJson<{ data?: any; error?: any }>(res);
+      if (!res.ok) {
+        alert((json as any)?.error || '회의실 정보를 저장하지 못했습니다.');
+        return;
+      }
+      const payload = json?.data;
+      if (payload) {
+        setRooms((prev) => {
+          if (form.id) {
+            return prev.map((room) => (room.id === payload.id ? payload : room));
+          }
+          return [...prev, payload];
+        });
+      }
+      setForm({ name: '', location: '', capacity: 4 });
+      await load();
+    } catch (error) {
+      console.error('Failed to submit room form', error);
+      alert('회의실 정보를 저장하지 못했습니다. 잠시 후 다시 시도하세요.');
+    }
   };
 
   const remove = async (id: string) => {
-    if (!confirm('삭제하시겠습니까? 관련 예약이 함께 삭제됩니다.')) return;
-    const res = await fetch('/api/admin/rooms?id=' + id, { method: 'DELETE' });
-    const json = await res.json();
-    if (!res.ok) return alert(json.error || '삭제 실패');
-    load();
+    if (!confirm('삭제하시겠습니까? 관련 예약도 함께 삭제됩니다.')) return;
+    try {
+      const res = await fetch(`/api/admin/rooms?id=${id}`, { method: 'DELETE' });
+      const json = await readJson<{ error?: any }>(res);
+      if (!res.ok) {
+        alert((json as any)?.error || '회의실 삭제에 실패했습니다.');
+        return;
+      }
+      setRooms((prev) => prev.filter((room) => room.id !== id));
+      await load();
+    } catch (error) {
+      console.error('Failed to delete room', error);
+      alert('회의실 삭제에 실패했습니다. 잠시 후 다시 시도하세요.');
+    }
   };
 
   return (
@@ -71,7 +125,10 @@ export default function AdminPage() {
       <h1 className="text-2xl font-semibold">관리자 - 회의실 관리</h1>
       {unauthorized && (
         <Card className="p-4 text-sm">
-          관리자 권한이 필요합니다. <a className="underline" href="/admin/login">로그인 페이지로 이동</a>
+          관리자 권한이 필요합니다.{' '}
+          <a className="underline" href="/admin/login">
+            로그인 페이지로 이동
+          </a>
         </Card>
       )}
 
@@ -80,20 +137,44 @@ export default function AdminPage() {
         <div className="grid md:grid-cols-3 gap-3">
           <div className="space-y-1">
             <Label htmlFor="room-name">이름</Label>
-            <Input id="room-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <Input
+              id="room-name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
           </div>
           <div className="space-y-1">
             <Label htmlFor="room-location">위치</Label>
-            <Input id="room-location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
+            <Input
+              id="room-location"
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+            />
           </div>
           <div className="space-y-1">
             <Label htmlFor="room-capacity">수용 인원</Label>
-            <Input id="room-capacity" type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: Number(e.target.value || 0) })} />
+            <Input
+              id="room-capacity"
+              type="number"
+              value={form.capacity}
+              onChange={(e) =>
+                setForm({ ...form, capacity: Number(e.target.value || 0) })
+              }
+            />
           </div>
         </div>
         <div className="flex gap-2">
-          <Button onClick={submit} data-testid="submit-button">{form.id ? '수정' : '생성'}</Button>
-          {form.id && <Button variant="secondary" onClick={() => setForm({ name: '', location: '', capacity: 4 })}>취소</Button>}
+          <Button onClick={submit} data-testid="submit-button">
+            {form.id ? '수정' : '생성'}
+          </Button>
+          {form.id && (
+            <Button
+              variant="secondary"
+              onClick={() => setForm({ name: '', location: '', capacity: 4 })}
+            >
+              취소
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -109,17 +190,39 @@ export default function AdminPage() {
               <li key={r.id} className="flex items-center justify-between py-2">
                 <div className="text-sm">
                   <div className="font-medium">{r.name}</div>
-                  <div className="text-muted-foreground">{r.location} · {r.capacity}인</div>
+                  <div className="text-muted-foreground">
+                    {r.location} · {r.capacity}명
+                  </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => setForm({ id: r.id, name: r.name, location: r.location, capacity: r.capacity })}>수정</Button>
-                  <Button variant="destructive" onClick={() => remove(r.id)}>삭제</Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      setForm({
+                        id: r.id,
+                        name: r.name,
+                        location: r.location,
+                        capacity: r.capacity,
+                      })
+                    }
+                  >
+                    수정
+                  </Button>
+                  <Button variant="destructive" onClick={() => remove(r.id)}>
+                    삭제
+                  </Button>
                 </div>
               </li>
             ))}
+            {rooms.length === 0 && (
+              <li className="py-4 text-sm text-muted-foreground">
+                등록된 회의실이 없습니다.
+              </li>
+            )}
           </ul>
         )}
       </Card>
     </div>
   );
 }
+

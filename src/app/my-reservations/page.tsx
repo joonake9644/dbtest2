@@ -11,12 +11,18 @@ import { cancelReservation } from '@/lib/services/reservations';
 import type { Reservation } from '@/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+type MyReservation = Reservation & {
+  reserver_name?: string;
+  reserver_phone?: string;
+  room?: { name: string; location: string; capacity?: number } | null;
+};
+
 export default function MyReservationsPage() {
   const { toast } = useToast();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [list, setList] = useState<Reservation[]>([]);
+  const [list, setList] = useState<MyReservation[]>([]);
   const [roomMap, setRoomMap] = useState<Record<string, { name: string; location: string; capacity?: number }>>({});
   const [status, setStatus] = useState<'all' | 'active' | 'cancelled'>('all');
   const [from, setFrom] = useState('');
@@ -34,7 +40,7 @@ export default function MyReservationsPage() {
         body: JSON.stringify({ phone, password }),
       }).then((r) => r.json());
       if (res.error) throw new Error(res.error);
-      const data = (res.data ?? []) as any[];
+      const data = (res.data ?? []) as MyReservation[];
       const map: Record<string, { name: string; location: string; capacity?: number }> = {};
       data.forEach((r) => { if (r.room) map[r.room_id] = r.room; });
       setRoomMap(map);

@@ -1,0 +1,60 @@
+오류 의미
+이 오류는 다음과 같은 상황에서 발생합니다:
+
+단일 객체를 기대했지만 여러 개의 결과가 반환됨
+.single() 메서드를 사용했는데 쿼리 결과가 0개 또는 2개 이상임
+고유하지 않은 조건으로 데이터를 조회할 때
+
+해결 방법
+1. 코드에서 .single() 제거 또는 변경
+문제가 되는 코드:
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName)
+  .single(); // 이 부분이 문제
+해결 방법 1 - 배열로 받기:
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName); // .single() 제거
+
+// data는 배열이므로 첫 번째 요소 사용
+const room = data?.[0];
+해결 방법 2 - 고유 조건 사용:
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('id', roomId) // ID는 고유하므로 안전
+  .single();
+2. 조건부로 .single() 사용
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName);
+
+if (error) {
+  console.error('쿼리 오류:', error);
+  return;
+}
+
+if (data.length === 1) {
+  const room = data[0]; // 단일 결과 처리
+} else if (data.length > 1) {
+  console.log('여러 개의 결과가 있습니다:', data);
+} else {
+  console.log('결과가 없습니다');
+}
+3. 오류 처리 개선
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName)
+  .maybeSingle(); // 0개 또는 1개 결과를 예상할 때 사용
+디버깅 팁
+
+브라우저 개발자 도구에서 네트워크 탭 확인
+Supabase 대시보드에서 직접 쿼리 테스트
+데이터 중복 여부 확인 (같은 이름의 회의실이 여러 개 있는지)
+
+현재 화면에서 "수정" 버튼을 클릭할 때 이 오류가 발생하는 것으로 보이니, 해당 버튼의 클릭 핸들러에서 .single() 사용 부분을 확인하고 위의 방법으로 수정하시면 됩니다.

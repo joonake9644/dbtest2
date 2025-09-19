@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { createPureClient } from '@/lib/supabase/server';
 
 export async function POST(req: Request) {
@@ -18,9 +18,12 @@ export async function POST(req: Request) {
 
     const list = (reservations ?? []) as any[];
     const roomIds = Array.from(new Set(list.map((r) => r.room_id).filter(Boolean)));
-    let rooms: Record<string, { name: string; location: string; capacity?: number }> = {};
+    const rooms: Record<string, { name: string; location: string; capacity?: number }> = {};
     if (roomIds.length) {
-      const { data: roomsData } = await supabase.from('meeting_rooms').select('id,name,location,capacity').in('id', roomIds);
+      const { data: roomsData } = await supabase
+        .from('meeting_rooms')
+        .select('id,name,location,capacity')
+        .in('id', roomIds);
       (roomsData ?? []).forEach((r: any) => {
         rooms[r.id] = { name: r.name, location: r.location, capacity: r.capacity };
       });
