@@ -19,7 +19,8 @@ export async function getReservationsByDate(
   const { data, error } = await supabase
     .from('public_reservations')
     .select('*')
-    .eq('reservation_date', date);
+    .eq('reservation_date', date)
+    .eq('status', 'active');
   if (error) throw error;
   return data as unknown as Reservation[];
 }
