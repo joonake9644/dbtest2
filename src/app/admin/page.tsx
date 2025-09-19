@@ -120,9 +120,28 @@ export default function AdminPage() {
     }
   };
 
+  const logout = async () => {
+    try {
+      const res = await fetch('/api/admin/auth', { method: 'DELETE' });
+      if (res.ok) {
+        setUnauthorized(true);
+      }
+    } catch (error) {
+      console.error('Failed to logout', error);
+      alert('로그아웃에 실패했습니다.');
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">관리자 - 회의실 관리</h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-semibold">관리자 - 회의실 관리</h1>
+        {!unauthorized && (
+          <Button variant="secondary" onClick={logout}>
+            로그아웃
+          </Button>
+        )}
+      </div>
       {unauthorized && (
         <Card className="p-4 text-sm">
           관리자 권한이 필요합니다.{' '}
@@ -132,96 +151,100 @@ export default function AdminPage() {
         </Card>
       )}
 
-      <Card className="p-4 space-y-3">
-        <h2 className="font-medium">회의실 생성/수정</h2>
-        <div className="grid md:grid-cols-3 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="room-name">이름</Label>
-            <Input
-              id="room-name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="room-location">위치</Label>
-            <Input
-              id="room-location"
-              value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="room-capacity">수용 인원</Label>
-            <Input
-              id="room-capacity"
-              type="number"
-              value={form.capacity}
-              onChange={(e) =>
-                setForm({ ...form, capacity: Number(e.target.value || 0) })
-              }
-            />
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={submit} data-testid="submit-button">
-            {form.id ? '수정' : '생성'}
-          </Button>
-          {form.id && (
-            <Button
-              variant="secondary"
-              onClick={() => setForm({ name: '', location: '', capacity: 4 })}
-            >
-              취소
-            </Button>
-          )}
-        </div>
-      </Card>
+      {!unauthorized && (
+        <>
+          <Card className="p-4 space-y-3">
+            <h2 className="font-medium">회의실 생성/수정</h2>
+            <div className="grid md:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="room-name">이름</Label>
+                <Input
+                  id="room-name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="room-location">위치</Label>
+                <Input
+                  id="room-location"
+                  value={form.location}
+                  onChange={(e) => setForm({ ...form, location: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="room-capacity">수용 인원</Label>
+                <Input
+                  id="room-capacity"
+                  type="number"
+                  value={form.capacity}
+                  onChange={(e) =>
+                    setForm({ ...form, capacity: Number(e.target.value || 0) })
+                  }
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={submit} data-testid="submit-button">
+                {form.id ? '수정' : '생성'}
+              </Button>
+              {form.id && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setForm({ name: '', location: '', capacity: 4 })}
+                >
+                  취소
+                </Button>
+              )}
+            </div>
+          </Card>
 
-      <Card className="p-4 space-y-3">
-        <h2 className="font-medium">회의실 목록</h2>
-        {loading ? (
-          <p className="text-sm text-muted-foreground">불러오는 중...</p>
-        ) : unauthorized ? (
-          <p className="text-sm text-muted-foreground">권한이 없습니다.</p>
-        ) : (
-          <ul className="divide-y">
-            {rooms.map((r: any) => (
-              <li key={r.id} className="flex items-center justify-between py-2">
-                <div className="text-sm">
-                  <div className="font-medium">{r.name}</div>
-                  <div className="text-muted-foreground">
-                    {r.location} · {r.capacity}명
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      setForm({
-                        id: r.id,
-                        name: r.name,
-                        location: r.location,
-                        capacity: r.capacity,
-                      })
-                    }
-                  >
-                    수정
-                  </Button>
-                  <Button variant="destructive" onClick={() => remove(r.id)}>
-                    삭제
-                  </Button>
-                </div>
-              </li>
-            ))}
-            {rooms.length === 0 && (
-              <li className="py-4 text-sm text-muted-foreground">
-                등록된 회의실이 없습니다.
-              </li>
+          <Card className="p-4 space-y-3">
+            <h2 className="font-medium">회의실 목록</h2>
+            {loading ? (
+              <p className="text-sm text-muted-foreground">불러오는 중...</p>
+            ) : unauthorized ? (
+              <p className="text-sm text-muted-foreground">권한이 없습니다.</p>
+            ) : (
+              <ul className="divide-y">
+                {rooms.map((r: any) => (
+                  <li key={r.id} className="flex items-center justify-between py-2">
+                    <div className="text-sm">
+                      <div className="font-medium">{r.name}</div>
+                      <div className="text-muted-foreground">
+                        {r.location} · {r.capacity}명
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          setForm({
+                            id: r.id,
+                            name: r.name,
+                            location: r.location,
+                            capacity: r.capacity,
+                          })
+                        }
+                      >
+                        수정
+                      </Button>
+                      <Button variant="destructive" onClick={() => remove(r.id)}>
+                        삭제
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+                {rooms.length === 0 && (
+                  <li className="py-4 text-sm text-muted-foreground">
+                    등록된 회의실이 없습니다.
+                  </li>
+                )}
+              </ul>
             )}
-          </ul>
-        )}
-      </Card>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
