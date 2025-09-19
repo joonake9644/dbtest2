@@ -34,3 +34,8 @@ export interface RoomWithReservations extends Room {
   reservations: Reservation[];
 }
 
+export type UserSession = {
+  userId: string;
+  name: string;
+};
+

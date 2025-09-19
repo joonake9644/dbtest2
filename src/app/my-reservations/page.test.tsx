@@ -1,33 +1,31 @@
-﻿import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import MyReservationsPage from './page';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import MyReservationsClientPage from './client-page'; // Changed import
 import * as reservationService from '@/lib/services/reservations';
-import * as roomService from '@/lib/services/rooms';
 import { vi } from 'vitest';
+import type { UserSession } from '@/types';
 
+// Mocks
 vi.mock('@/lib/services/reservations');
-vi.mock('@/lib/services/rooms');
-
 const mockedGetMyReservations = vi.mocked(reservationService.getMyReservations);
 const mockedCancelReservation = vi.mocked(reservationService.cancelReservation);
-const mockedGetRooms = vi.mocked(roomService.getRooms);
 
 const mockToast = vi.fn();
 vi.mock('@/hooks/use-toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
-const sampleRooms = [
-  { id: 'room-1', name: '대회의실', location: '본관 3층', capacity: 12, created_at: '', updated_at: '' },
-  { id: 'room-2', name: '소회의실', location: '본관 2층', capacity: 6, created_at: '', updated_at: '' },
-];
+// Mock session data
+const mockSession: UserSession = {
+  userId: 'user-123',
+  name: '홍길동',
+};
 
-describe('MyReservationsPage', () => {
+describe('MyReservationsClientPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedGetRooms.mockResolvedValue(sampleRooms);
   });
 
-  it('should display reservations when correct credentials are provided', async () => {
+  it('should display reservations for the logged-in user', async () => {
     const mockReservations = [
       {
         id: '1',
@@ -36,8 +34,7 @@ describe('MyReservationsPage', () => {
         start_time: '10:00:00',
         end_time: '11:00:00',
         status: 'active',
-        reserver_name: '홍길동',
-        reserver_phone: '010-1234-5678',
+        room: { name: '대회의실', location: '본관 3층' },
       },
       {
         id: '2',
@@ -46,72 +43,70 @@ describe('MyReservationsPage', () => {
         start_time: '14:00:00',
         end_time: '15:00:00',
         status: 'cancelled',
-        reserver_name: '이몽룡',
-        reserver_phone: '010-0000-0000',
+        room: { name: '소회의실', location: '본관 2층' },
       },
     ];
     mockedGetMyReservations.mockResolvedValue({ success: true, data: mockReservations });
 
-    render(<MyReservationsPage />);
+    render(<MyReservationsClientPage session={mockSession} />);
 
-    fireEvent.change(screen.getByLabelText('전화번호'), { target: { value: '010-1234-5678' } });
-    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: '조회' }));
-
+    // The component now fetches data on mount, so we just wait for the result
     await waitFor(() => {
-      expect(screen.getByText('2025-09-20 · 10:00~11:00')).toBeInTheDocument();
-      expect(screen.getByText('2025-09-21 · 14:00~15:00')).toBeInTheDocument();
+      expect(screen.getByText('2025-09-20 · 10:00–11:00')).toBeInTheDocument();
+      expect(screen.getByText('2025-09-21 · 14:00–15:00')).toBeInTheDocument();
     });
 
     expect(screen.getByText(/대회의실/)).toBeInTheDocument();
     expect(screen.getByText(/소회의실/)).toBeInTheDocument();
-    expect(mockedGetMyReservations).toHaveBeenCalledWith('010-1234-5678', 'password123');
+    expect(mockedGetMyReservations).toHaveBeenCalledTimes(1);
   });
 
   it('should show empty state when no reservations are found', async () => {
     mockedGetMyReservations.mockResolvedValue({ success: true, data: [] });
 
-    render(<MyReservationsPage />);
-
-    fireEvent.change(screen.getByLabelText('전화번호'), { target: { value: '010-1234-5678' } });
-    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: '조회' }));
+    render(<MyReservationsClientPage session={mockSession} />);
 
     await waitFor(() => {
-      expect(screen.getByText('조회된 예약이 없습니다.')).toBeInTheDocument();
+      expect(screen.getByText('예약 내역이 없습니다.')).toBeInTheDocument();
     });
-    expect(mockToast).not.toHaveBeenCalled();
   });
 
   it('should call cancelReservation when the cancel button is clicked', async () => {
     const mockReservations = [
       {
-        id: '1',
+        id: 'res-1',
         room_id: 'room-1',
         reservation_date: '2025-09-20',
         start_time: '10:00:00',
         end_time: '11:00:00',
         status: 'active',
-        reserver_name: '홍길동',
-        reserver_phone: '010-1234-5678',
+        room: { name: '대회의실', location: '본관 3층' },
       },
     ];
-    mockedGetMyReservations.mockResolvedValueOnce({ success: true, data: mockReservations });
-    mockedGetMyReservations.mockResolvedValueOnce({ success: true, data: [] });
+    // Mock the initial fetch and the fetch after cancellation
+    mockedGetMyReservations
+      .mockResolvedValueOnce({ success: true, data: mockReservations })
+      .mockResolvedValueOnce({ success: true, data: [] });
+      
     mockedCancelReservation.mockResolvedValue({ success: true });
 
-    render(<MyReservationsPage />);
+    // Mock window.confirm
+    window.confirm = vi.fn(() => true);
 
-    fireEvent.change(screen.getByLabelText('전화번호'), { target: { value: '010-1234-5678 ' } });
-    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'password123 ' } });
-    fireEvent.click(screen.getByRole('button', { name: '조회' }));
+    render(<MyReservationsClientPage session={mockSession} />);
 
     const cancelButton = await screen.findByRole('button', { name: '취소' });
     fireEvent.click(cancelButton);
 
     await waitFor(() => {
-      expect(mockedCancelReservation).toHaveBeenCalledWith('1', '010-1234-5678', 'password123');
+      expect(mockedCancelReservation).toHaveBeenCalledWith('res-1');
     });
+    
     expect(mockToast).toHaveBeenCalledWith({ description: '예약이 취소되었습니다.' });
+    
+    // Check if the list is updated
+    await waitFor(() => {
+        expect(screen.getByText('예약 내역이 없습니다.')).toBeInTheDocument();
+    });
   });
 });

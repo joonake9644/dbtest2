@@ -1,20 +1,32 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createPureClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   try {
-    const { phone, password } = await req.json();
-    if (!phone || !password) {
-      return NextResponse.json({ error: 'phone/password required' }, { status: 400 });
+    const cookieStore = cookies();
+    const sessionCookie = cookieStore.get('user_session');
+
+    if (!sessionCookie) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const session = JSON.parse(sessionCookie.value);
+    const userId = session?.userId;
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
     const supabase = await createPureClient();
 
-    const { data: reservations, error } = await supabase.rpc('get_my_reservations', {
-      p_phone: phone,
-      p_password: password,
+    const { data: reservations, error } = await supabase.rpc('get_my_reservations_for_user', {
+      p_user_id: userId,
     });
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
 
     const list = (reservations ?? []) as any[];
     const roomIds = Array.from(new Set(list.map((r) => r.room_id).filter(Boolean)));
@@ -39,4 +51,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e?.message ?? 'unexpected error' }, { status: 500 });
   }
 }
-

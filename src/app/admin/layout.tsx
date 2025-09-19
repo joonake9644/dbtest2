@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
 
 function AdminNavLink({ href, children }: { href: string; children: React.ReactNode }) {
   const pathname = usePathname();
@@ -14,10 +15,30 @@ function AdminNavLink({ href, children }: { href: string; children: React.ReactN
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+
+  const logout = async () => {
+    try {
+      const res = await fetch('/api/admin/auth', { method: 'DELETE' });
+      if (res.ok) {
+        router.push('/admin/login');
+      } else {
+        alert('로그아웃에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Failed to logout', error);
+      alert('로그아웃에 실패했습니다.');
+    }
+  };
+
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Admin Dashboard</h1>
+        <Button variant="secondary" onClick={logout}>
+          Logout
+        </Button>
       </div>
       <nav className="flex gap-6">
         <AdminNavLink href="/admin">Room Management</AdminNavLink>
