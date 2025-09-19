@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createPureClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { cookies } from 'next/headers';
 
 export async function GET(req: Request) {
@@ -18,7 +18,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
-    const supabase = await createPureClient();
+    const supabase = createServiceClient();
 
     const { data: reservations, error } = await supabase.rpc('get_my_reservations_for_user', {
       p_user_id: userId,

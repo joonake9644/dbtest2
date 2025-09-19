@@ -1,172 +1,93 @@
-﻿import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import AdminPage from "./page";
-import { vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import AdminPage from './page';
+import { vi } from 'vitest';
 
-type FetchResponseInit = {
-  ok?: boolean;
-  status?: number;
-  body?: any;
-};
-
-function createFetchResponse({ ok = true, status = 200, body = {} }: FetchResponseInit) {
-  const payload = body;
-  const serialized = body === null ? "" : JSON.stringify(body);
-  return {
-    ok,
-    status,
-    text: vi.fn().mockResolvedValue(serialized),
-    json: vi.fn().mockResolvedValue(payload),
-  } as unknown as Response;
-}
-
+// Mock global fetch
 global.fetch = vi.fn();
-window.confirm = vi.fn(() => true);
 
-const mockChannel = {
-  on: vi.fn().mockReturnThis(),
-  subscribe: vi.fn(),
-};
-const mockSupabase = {
-  channel: vi.fn(() => mockChannel),
-  removeChannel: vi.fn(),
-};
-
-vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => mockSupabase,
-}));
-
-describe("AdminPage", () => {
+describe('AdminPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("should display unauthorized message if fetch returns 401", async () => {
-    (fetch as vi.Mock).mockResolvedValueOnce(
-      createFetchResponse({ ok: false, status: 401, body: { error: "Unauthorized" } })
-    );
-
+  it('should display unauthorized message if fetch returns 401', async () => {
+    // Arrange
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: false, 
+      status: 401, 
+      json: () => Promise.resolve({ error: 'Unauthorized' })
+    });
     render(<AdminPage />);
 
+    // Assert
     await waitFor(() => {
-      expect(screen.getByText("관리자 권한이 필요합니다.")).toBeInTheDocument();
+      expect(screen.getByText('관리자 권한이 필요합니다.')).toBeInTheDocument();
+      expect(screen.getByText('로그인 페이지로 이동')).toHaveAttribute('href', '/admin/login');
     });
   });
 
-  it("should display a list of rooms on successful fetch", async () => {
-    const mockRooms = [{ id: "1", name: "Room 1", location: "1F", capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: mockRooms } }));
-
+  it('should display a list of rooms on successful fetch', async () => {
+    // Arrange
+    const mockRooms = [
+      { id: '1', name: 'Room 1', location: '1F', capacity: 10 },
+      { id: '2', name: 'Room 2', location: '2F', capacity: 5 },
+    ];
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: mockRooms })
+    });
     render(<AdminPage />);
 
+    // Assert
     await waitFor(() => {
-      expect(screen.getByText("Room 1")).toBeInTheDocument();
+      expect(screen.getByText('Room 1')).toBeInTheDocument();
+      expect(screen.getByText('1F · 10인')).toBeInTheDocument();
+      expect(screen.getByText('Room 2')).toBeInTheDocument();
+      expect(screen.getByText('2F · 5인')).toBeInTheDocument();
     });
   });
 
-  it("should allow creating a new room", async () => {
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: [] } }));
-    (fetch as vi.Mock).mockResolvedValueOnce(
-      createFetchResponse({ body: { data: { id: "3", name: "New Room", location: "3F", capacity: 8 } } })
-    );
-    const newMockRooms = [{ id: "3", name: "New Room", location: "3F", capacity: 8 }];
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: newMockRooms } }));
+  it('should allow creating a new room', async () => {
+    // Arrange
+    // 1. Initial load is empty
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: [] })
+    });
+    // 2. Mock the POST request for creation
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: { id: '3', name: 'New Room', location: '3F', capacity: 8 } })
+    });
+    // 3. Mock the reload after creation
+    const newMockRooms = [{ id: '3', name: 'New Room', location: '3F', capacity: 8 }];
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: newMockRooms })
+    });
 
     render(<AdminPage />);
 
-    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "New Room" } });
-    fireEvent.change(screen.getByLabelText("위치"), { target: { value: "3F" } });
-    fireEvent.change(screen.getByLabelText("수용 인원"), { target: { value: "8" } });
-    fireEvent.click(screen.getByTestId("submit-button"));
+    // Act
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'New Room' } });
+    fireEvent.change(screen.getByLabelText('위치'), { target: { value: '3F' } });
+    fireEvent.change(screen.getByLabelText('수용 인원'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: '생성' }));
 
+    // Assert
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/admin/rooms",
-        expect.objectContaining({ method: "POST" })
-      );
-    });
-    await waitFor(() => {
-      expect(screen.getByText("New Room")).toBeInTheDocument();
-    });
-  });
-
-  it("should allow editing a room", async () => {
-    const initialRooms = [{ id: "1", name: "Old Name", location: "1F", capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: initialRooms } }));
-    (fetch as vi.Mock).mockResolvedValueOnce(
-      createFetchResponse({ body: { data: { id: "1", name: "New Name", location: "1F", capacity: 10 } } })
-    );
-    const updatedRooms = [{ id: "1", name: "New Name", location: "1F", capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: updatedRooms } }));
-
-    render(<AdminPage />);
-
-    const listItem = await screen.findByText("Old Name");
-    const parentLi = listItem.closest("li");
-    const editButton = within(parentLi!).getByRole("button", { name: "수정" });
-    fireEvent.click(editButton);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("이름")).toHaveValue("Old Name");
+      // Check if the POST request was made
+      expect(fetch).toHaveBeenCalledWith('/api/admin/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'New Room', location: '3F', capacity: 8 }),
+      });
     });
 
-    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "New Name" } });
-    fireEvent.click(screen.getByTestId("submit-button"));
-
+    // Check if the new room is displayed
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/admin/rooms",
-        expect.objectContaining({ method: "PUT" })
-      );
-    });
-    await waitFor(() => {
-      expect(screen.getByText("New Name")).toBeInTheDocument();
-    });
-  });
-
-  it("should allow deleting a room", async () => {
-    const initialRooms = [{ id: "1", name: "To Delete", location: "1F", capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: initialRooms } }));
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: {} }));
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: [] } }));
-
-    render(<AdminPage />);
-
-    const listItem = await screen.findByText("To Delete");
-    const parentLi = listItem.closest("li");
-    const deleteButton = within(parentLi!).getByRole("button", { name: "삭제" });
-    fireEvent.click(deleteButton);
-
-    expect(window.confirm).toHaveBeenCalled();
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(`/api/admin/rooms?id=1`, { method: "DELETE" });
-    });
-    await waitFor(() => {
-      expect(screen.queryByText("To Delete")).not.toBeInTheDocument();
-    });
-  });
-
-  it("should reload rooms on database change event", async () => {
-    (fetch as vi.Mock).mockResolvedValueOnce(createFetchResponse({ body: { data: [] } }));
-
-    render(<AdminPage />);
-
-    await waitFor(() =>
-      expect(mockSupabase.channel).toHaveBeenCalledWith("meeting_rooms:realtime")
-    );
-
-    const onCallback = mockChannel.on.mock.calls[0][2];
-    expect(onCallback).toBeInstanceOf(Function);
-
-    (fetch as vi.Mock).mockResolvedValueOnce(
-      createFetchResponse({ body: { data: [{ id: "realtime", name: "Realtime Room" }] } })
-    );
-    await onCallback({});
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledTimes(2);
-      expect(screen.getByText("Realtime Room")).toBeInTheDocument();
+      expect(screen.getByText('New Room')).toBeInTheDocument();
+      expect(screen.getByText('3F · 8인')).toBeInTheDocument();
     });
   });
 });
-

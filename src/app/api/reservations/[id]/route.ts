@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createPureClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { cookies } from 'next/headers';
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
@@ -21,7 +21,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
-    const supabase = await createPureClient();
+    const supabase = createServiceClient();
     const { error } = await supabase.rpc('cancel_reservation_authed', {
       p_reservation_id: reservationId,
       p_user_id: userId,
@@ -36,3 +36,4 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
   }
 }
+

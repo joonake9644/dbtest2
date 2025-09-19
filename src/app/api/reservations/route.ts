@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createPureClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { cookies } from 'next/headers';
 
 export async function POST(req: Request) {
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
     }
 
     // 3. Call the authenticated RPC
-    const supabase = await createPureClient();
+    const supabase = createServiceClient();
     const { data, error } = await supabase.rpc('create_reservation_authed', {
       p_room_id: room_id,
       p_date: reservation_date,
@@ -33,9 +33,9 @@ export async function POST(req: Request) {
     });
 
     if (error) {
-      const message = error?.message || '예약 처리 중 오류가 발생했습니다.';
+      const message = error?.message || '?�약 처리 �??�류가 발생?�습?�다.';
       const duplicateConflict = /overlap/i.test(message) || /conflict/i.test(message);
-      const finalMessage = duplicateConflict ? '선택하신 시간대에는 이미 예약이 있습니다.' : message;
+      const finalMessage = duplicateConflict ? '?�택?�신 ?�간?�?�는 ?��? ?�약???�습?�다.' : message;
       return NextResponse.json({ error: finalMessage }, { status: 400 });
     }
 
@@ -45,3 +45,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
   }
 }
+

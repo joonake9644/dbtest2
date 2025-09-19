@@ -49,29 +49,52 @@ The content is organized as follows:
 .cursor/rules/TDD.mdc
 .cursor/user.mdc
 .cursorignore
+.github/workflows/db-validate.yml
 .gitignore
 components.json
 doc/datebase.mdc
 doc/prd.mdc
+doc/prd2.md
+doc/qa-checklist.md
+doc/test-data.md
 doc/trd.mdc
+doc/trd2.md
 doc/userflow.mdc
+error
 eslint.config.mjs
 next.config.ts
 package.json
 postcss.config.mjs
 README.md
+src/app/admin/layout.tsx
 src/app/admin/login/page.test.tsx
 src/app/admin/login/page.tsx
 src/app/admin/page.test.tsx
 src/app/admin/page.tsx
+src/app/admin/reservers/page.tsx
 src/app/api/admin/auth/route.ts
+src/app/api/admin/debug-user/route.ts
+src/app/api/admin/reservers/[phone]/route.ts
+src/app/api/admin/reservers/route.ts
 src/app/api/admin/rooms/route.ts
+src/app/api/auth/login/route.ts
+src/app/api/auth/logout/route.ts
+src/app/api/auth/reset-password/route.ts
+src/app/api/auth/signup/route.ts
+src/app/api/my-reservations/route.ts
+src/app/api/reservations/[id]/route.ts
+src/app/api/reservations/route.ts
+src/app/forgot-password/page.tsx
 src/app/globals.css
+src/app/home-client-page.tsx
 src/app/layout.tsx
+src/app/login/page.tsx
+src/app/my-reservations/client-page.tsx
 src/app/my-reservations/page.test.tsx
 src/app/my-reservations/page.tsx
-src/app/page.tsx
 src/app/providers.tsx
+src/app/signup/page.tsx
+src/components/nav.tsx
 src/components/ui/accordion.tsx
 src/components/ui/avatar.tsx
 src/components/ui/badge.tsx
@@ -111,6 +134,15 @@ supabase/migrations/20250915230000_security_hardening.sql
 supabase/migrations/20250915231000_get_my_reservations_rpc.sql
 supabase/migrations/20250915232000_enable_pgcrypto_and_hash_passwords.sql
 supabase/migrations/20250916110000_disable_rls_for_dev.sql
+supabase/migrations/20250917120000_v2_spec_alignment.sql
+supabase/migrations/20250917121000_rls_policies.sql
+supabase/migrations/20250917123000_disable_rls_for_prod.sql
+supabase/migrations/20250919120000_fix_get_my_reservations.sql
+supabase/migrations/20250919130000_admin_user_management.sql
+supabase/migrations/20250919140000_user_password_reset.sql
+supabase/migrations/20250919150000_refactor_user_system.sql
+supabase/migrations/20250919160000_finalize_user_refactor.sql
+supabase/migrations/20250919170000_debug_user_data.sql
 tailwind.config.ts
 tsconfig.json
 vitest.config.ts
@@ -118,6 +150,58 @@ vitest.config.ts
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="src/app/api/admin/debug-user/route.ts">
+import { NextResponse } from 'next/server';
+import { createPureClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth/admin';
+
+export async function GET(req: Request) {
+  const adminErr = requireAdmin(req as any);
+  if (adminErr) return adminErr;
+
+  const { searchParams } = new URL(req.url);
+  const phone = searchParams.get('phone');
+
+  if (!phone) {
+    return NextResponse.json({ error: 'Phone parameter is required' }, { status: 400 });
+  }
+
+  const supabase = await createPureClient();
+  const { data, error } = await supabase.rpc('admin_debug_user_data', { p_phone: phone });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ data });
+}
+</file>
+
+<file path="supabase/migrations/20250919170000_debug_user_data.sql">
+-- RPC to debug user and reservation data for a specific phone number
+CREATE OR REPLACE FUNCTION public.admin_debug_user_data(p_phone TEXT)
+RETURNS JSON AS $$
+DECLARE
+  user_data JSON;
+  reservations_data JSON;
+BEGIN
+  -- Get user data
+  SELECT to_json(u) INTO user_data FROM public.users u WHERE u.phone = p_phone;
+
+  -- Get reservations data
+  SELECT json_agg(r) INTO reservations_data FROM public.reservations r WHERE r.reserver_phone = p_phone;
+
+  -- Return as a single JSON object
+  RETURN json_build_object(
+    'user', user_data,
+    'reservations', reservations_data
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.admin_debug_user_data(TEXT) TO authenticated, service_role;
+</file>
 
 <file path=".cursor/user.mdc">
 ---
@@ -127,333 +211,67 @@ alwaysApply: true
 ---
 </file>
 
-<file path="src/app/admin/login/page.test.tsx">
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import AdminLoginPage from './page';
-import { vi } from 'vitest';
-
-// Mock global fetch
-global.fetch = vi.fn();
-
-// Mock window.location
-const originalLocation = window.location;
-Object.defineProperty(window, 'location', {
-  configurable: true,
-  value: { ...originalLocation, href: '' },
-});
-
-describe('AdminLoginPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    window.location.href = '';
-  });
-
-  it('should redirect to /admin on successful login', async () => {
-    // Arrange
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true });
-    render(<AdminLoginPage />);
-
-    // Act
-    fireEvent.change(screen.getByLabelText('관리자 토큰'), { target: { value: 'good-token' } });
-    fireEvent.click(screen.getByRole('button', { name: '로그인' }));
-
-    // Assert
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith('/api/admin/auth', expect.any(Object));
-    });
-    await waitFor(() => {
-      expect(window.location.href).toBe('/admin');
-    });
-  });
-
-  it('should display an error message on failed login', async () => {
-    // Arrange
-    (fetch as vi.Mock).mockResolvedValueOnce({
-      ok: false,
-      json: () => Promise.resolve({ error: 'Invalid token' }),
-    });
-    render(<AdminLoginPage />);
-
-    // Act
-    fireEvent.change(screen.getByLabelText('관리자 토큰'), { target: { value: 'bad-token' } });
-    fireEvent.click(screen.getByRole('button', { name: '로그인' }));
-
-    // Assert
-    await waitFor(() => {
-      expect(screen.getByText('Invalid token')).toBeInTheDocument();
-    });
-    expect(window.location.href).not.toBe('/admin');
-  });
-});
-</file>
-
-<file path="src/app/admin/page.test.tsx">
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import AdminPage from './page';
-import { vi } from 'vitest';
-
-// Mock global fetch and confirm
-global.fetch = vi.fn();
-window.confirm = vi.fn(() => true); // Assume user always confirms
-
-// Mock the Supabase client
-const mockChannel = {
-  on: vi.fn().mockReturnThis(),
-  subscribe: vi.fn(),
-  unsubscribe: vi.fn(),
-};
-const mockSupabase = {
-  channel: vi.fn(() => mockChannel),
-  removeChannel: vi.fn(),
-};
-
-vi.mock('@/lib/supabase/client', () => ({
-  createClient: () => mockSupabase,
-}));
-
-describe('AdminPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('should display unauthorized message if fetch returns 401', async () => {
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: false, status: 401, json: () => Promise.resolve({ error: 'Unauthorized' }) });
-    render(<AdminPage />);
-    await waitFor(() => {
-      expect(screen.getByText('관리자 권한이 필요합니다.')).toBeInTheDocument();
-    });
-  });
-
-  it('should display a list of rooms on successful fetch', async () => {
-    const mockRooms = [{ id: '1', name: 'Room 1', location: '1F', capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: mockRooms }) });
-    render(<AdminPage />);
-    await waitFor(() => {
-      expect(screen.getByText('Room 1')).toBeInTheDocument();
-    });
-  });
-
-  it('should allow creating a new room', async () => {
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: { id: '3', name: 'New Room', location: '3F', capacity: 8 } }) });
-    const newMockRooms = [{ id: '3', name: 'New Room', location: '3F', capacity: 8 }];
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: newMockRooms }) });
-
-    render(<AdminPage />);
-
-    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'New Room' } });
-    fireEvent.change(screen.getByLabelText('위치'), { target: { value: '3F' } });
-    fireEvent.change(screen.getByLabelText('수용 인원'), { target: { value: '8' } });
-    fireEvent.click(screen.getByTestId('submit-button'));
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith('/api/admin/rooms', expect.objectContaining({ method: 'POST' }));
-    });
-    await waitFor(() => {
-      expect(screen.getByText('New Room')).toBeInTheDocument();
-    });
-  });
-
-  it('should allow editing a room', async () => {
-    const initialRooms = [{ id: '1', name: 'Old Name', location: '1F', capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: initialRooms }) });
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: { id: '1', name: 'New Name', location: '1F', capacity: 10 } }) });
-    const updatedRooms = [{ id: '1', name: 'New Name', location: '1F', capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: updatedRooms }) });
-
-    render(<AdminPage />);
-
-    const listItem = await screen.findByText('Old Name');
-    const parentLi = listItem.closest('li');
-    const editButton = within(parentLi!).getByRole('button', { name: '수정' });
-    fireEvent.click(editButton);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('이름')).toHaveValue('Old Name');
-    });
-
-    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'New Name' } });
-    fireEvent.click(screen.getByTestId('submit-button'));
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith('/api/admin/rooms', expect.objectContaining({ method: 'PUT' }));
-    });
-    await waitFor(() => {
-      expect(screen.getByText('New Name')).toBeInTheDocument();
-    });
-  });
-
-  it('should allow deleting a room', async () => {
-    const initialRooms = [{ id: '1', name: 'To Delete', location: '1F', capacity: 10 }];
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: initialRooms }) });
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) }); // DELETE response
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) }); // Reload response
-
-    render(<AdminPage />);
-
-    const listItem = await screen.findByText('To Delete');
-    const parentLi = listItem.closest('li');
-    const deleteButton = within(parentLi!).getByRole('button', { name: '삭제' });
-    fireEvent.click(deleteButton);
-
-    expect(window.confirm).toHaveBeenCalled();
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith('/api/admin/rooms?id=1', { method: 'DELETE' });
-    });
-    await waitFor(() => {
-      expect(screen.queryByText('To Delete')).not.toBeInTheDocument();
-    });
-  });
-
-  it('should reload rooms on database change event', async () => {
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) });
-    render(<AdminPage />);
-
-    // Wait for initial render and subscription setup
-    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('meeting_rooms:realtime'));
-
-    // Find the callback function passed to .on()
-    const onCallback = mockChannel.on.mock.calls[0][2];
-    expect(onCallback).toBeInstanceOf(Function);
-
-    // Simulate a database change event
-    (fetch as vi.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [{ id: 'realtime', name: 'Realtime Room' }] }) });
-    await onCallback({});
-
-    // Assert that fetch was called again to reload data
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledTimes(2);
-      expect(screen.getByText('Realtime Room')).toBeInTheDocument();
-    });
-  });
-});
-</file>
-
-<file path="src/app/my-reservations/page.test.tsx">
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import MyReservationsPage from './page';
-import * as reservationService from '@/lib/services/reservations';
-import { vi } from 'vitest';
-
-// Mock the services
-vi.mock('@/lib/services/reservations');
-const mockedGetMyReservations = vi.mocked(reservationService.getMyReservations);
-const mockedCancelReservation = vi.mocked(reservationService.cancelReservation);
-
-// Mock the useToast hook
-const mockToast = vi.fn();
-vi.mock('@/hooks/use-toast', () => ({
-  useToast: () => ({ toast: mockToast }),
-}));
-
-describe('MyReservationsPage', () => {
-  beforeEach(() => {
-    // Clear mocks before each test
-    vi.clearAllMocks();
-  });
-
-  it('should display reservations when correct credentials are provided', async () => {
-    // Arrange
-    const mockReservations = [
-      { id: '1', reservation_date: '2025-09-20', start_time: '10:00:00', end_time: '11:00:00', status: 'active' },
-      { id: '2', reservation_date: '2025-09-21', start_time: '14:00:00', end_time: '15:00:00', status: 'cancelled' },
-    ];
-    mockedGetMyReservations.mockResolvedValue({ success: true, data: mockReservations });
-
-    render(<MyReservationsPage />);
-
-    // Act
-    fireEvent.change(screen.getByLabelText('전화번호'), { target: { value: '010-1234-5678' } });
-    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: '조회' }));
-
-    // Assert
-    await waitFor(() => {
-      expect(screen.getByText('2025-09-20 · 10:00~11:00')).toBeInTheDocument();
-    });
-    expect(screen.getByText('총 2건')).toBeInTheDocument();
-  });
-
-  it('should show a toast message when no reservations are found', async () => {
-    // Arrange
-    mockedGetMyReservations.mockResolvedValue({ success: true, data: [] });
-
-    render(<MyReservationsPage />);
-
-    // Act
-    fireEvent.click(screen.getByRole('button', { name: '조회' }));
-
-    // Assert
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith({ description: '예약 내역이 없습니다.' });
-    });
-  });
-
-  it('should call cancelReservation when the cancel button is clicked', async () => {
-    // Arrange
-    const mockReservations = [
-      { id: '1', reservation_date: '2025-09-20', start_time: '10:00:00', end_time: '11:00:00', status: 'active' },
-    ];
-    mockedGetMyReservations.mockResolvedValue({ success: true, data: mockReservations });
-    // Mock the cancel function to return success, and get to re-fetch
-    mockedCancelReservation.mockResolvedValue({ success: true });
-
-    render(<MyReservationsPage />);
-
-    // Act: First, search for the reservation
-    fireEvent.change(screen.getByLabelText('전화번호'), { target: { value: '010-1234-5678' } });
-    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: '조회' }));
-
-    // Wait for the reservation to appear and then click cancel
-    const cancelButton = await screen.findByRole('button', { name: '취소' });
-    fireEvent.click(cancelButton);
-
-    // Assert
-    await waitFor(() => {
-      expect(mockedCancelReservation).toHaveBeenCalledWith('1', '010-1234-5678', 'password123');
-    });
-    // Check if toast is shown
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith({ description: '예약이 취소되었습니다.' });
-    });
-  });
-});
-</file>
-
-<file path="src/test/setup.ts">
-import '@testing-library/jest-dom';
-</file>
-
-<file path="supabase/migrations/20250916110000_disable_rls_for_dev.sql">
--- Disabling Row Level Security for development purposes
-ALTER TABLE public.meeting_rooms DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.reservations DISABLE ROW LEVEL SECURITY;
-</file>
-
-<file path="vitest.config.ts">
-import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: './src/test/setup.ts',
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
-});
-</file>
-
 <file path=".cursorignore">
 pnpm-lock.yaml
 yarn.lock
 package-lock.json
+</file>
+
+<file path=".github/workflows/db-validate.yml">
+name: DB Validate
+
+on:
+  pull_request:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  migrate-and-check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: appdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres" 
+          --health-interval=10s --health-timeout=5s --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U postgres && break || sleep 2;
+          done
+
+      - name: Apply migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          for f in $(ls -1 supabase/migrations/*.sql | sort); do
+            echo "Applying $f";
+            psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -f "$f";
+          done
+
+      - name: Sanity queries
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -e
+          psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -c "\dt public.*";
+          psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -c "SELECT * FROM public.public_reservations LIMIT 1;" || true
+          psql -h localhost -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 -c "SELECT proname FROM pg_proc WHERE proname IN ('create_reservation','cancel_reservation','get_my_reservations');"
 </file>
 
 <file path=".gitignore">
@@ -524,6 +342,359 @@ next-env.d.ts
     "hooks": "@/hooks"
   }
 }
+</file>
+
+<file path="doc/prd2.md">
+# PRD v2 - 회의실 관리 시스템 (상세)
+
+본 문서는 현재 MVP를 기반으로 향후 유사 프로젝트 개발 시 오류를 최소화하기 위해 요구사항을 세분화해 정의합니다.
+
+## 1. 목표/범위/비범위
+- 목표: 회의실 예약/관리의 핵심 흐름을 안정적·명확하게 제공하고, 재사용 가능한 아키텍처로 고도화 기반을 마련한다.
+- 범위:
+  - 사용자: 날짜별 현황 조회, 예약 생성, 내 예약 조회/취소
+  - 관리자: 회의실 CRUD, 관리자 로그인(ID/PW)
+  - 실시간 반영: 예약/회의실 변경 즉시 UI 갱신
+- 비범위(본 버전): 알림(이메일/문자), 외부 캘린더 연동, 다중 건물/조직 권한, SSO/OAuth, 다국어(i18n)
+
+## 2. 페르소나/사용자 여정
+- 일반 사용자(예약자): 회의실 가용 시간 확인 → 시간 선택 → 정보 입력 → 예약 완료 → 필요 시 조회/취소
+- 관리자: 로그인 → 회의실 자원 관리(등록/수정/삭제) → 현황 모니터링
+
+## 3. 사용자 스토리 + 수용 기준
+- Story U1: 예약 현황 조회
+  - Given 날짜 입력이 기본 오늘로 선택됨
+  - When 다른 날짜로 변경
+  - Then 해당 날짜의 각 회의실 예약 타임블록이 정렬되어 표시됨(오름차순)
+- Story U2: 예약 생성
+  - Given 사용 가능한 시간대 선택
+  - When 이름/전화(010-0000-0000)/비밀번호(4자 이상) 유효 입력 후 제출
+  - Then 중복 방지 규칙을 통과하면 예약이 생성되고 토스트로 성공 표시, 목록이 갱신됨
+- Story U3: 내 예약 조회/취소
+  - Given 전화번호/비밀번호 입력
+  - When 조회 시 본인 예약만 목록으로 표시
+  - Then 취소 클릭 시 비밀번호 검증 후 상태가 cancelled로 변경되고 실시간 반영됨
+- Story A1: 관리자 회의실 생성/수정/삭제
+  - Given 관리자 로그인 성공
+  - When 이름/위치/수용인원 유효 입력 후 저장
+  - Then DB에 반영되고 목록/실시간이 갱신됨
+
+## 4. 기능 상세(필드/검증/오류)
+- 회의실(Room)
+  - 필수: name(1~100), location(1~200), capacity(양의 정수)
+  - 제약: name 중복 불가, capacity>0
+  - 오류 메시지: 필수 누락/형식 오류/중복 이름
+- 예약(Reservation)
+  - 필수: room_id, reservation_date(YYYY-MM-DD), start_time(HH:mm:ss), end_time(HH:mm:ss), reserver_name(1~50), reserver_phone(010-0000-0000), reserver_password(≥4)
+  - 비즈 규칙: end>start, 동일 방·날짜 내 시간 겹침 금지(활성 예약 한정), 취소 시 상태만 변경
+  - 오류 메시지: 형식 오류/중복 시간대/종료<시작/권한 없음
+- 관리자 인증
+  - 입력: username, password
+  - 실패: 401 with 에러 메시지(아이디/비밀번호 오류)
+  - 세션: `admin_session` 쿠키 발급(8h)
+
+## 5. 화면/UX 상태 정의
+- 메인: 날짜 입력, 회의실 카드 목록, 시간대 칩 UI, 예약 시트 폼(성공/실패 토스트)
+- 내 예약: 전화/비밀번호 입력폼, 예약 목록(취소 버튼), 빈 상태 메시지
+- 관리자: 로그인(아이디/비번), 회의실 폼/목록, 편집/삭제, 권한 없음 안내
+- 로딩/오류: 스피너 또는 텍스트, 친화적 메시지(한국어)
+
+## 6. API 계약(요약, 상세는 TRD 참고)
+- 관리자 인증: POST /api/admin/auth { username, password } → 200 { ok } | 401 { error }
+- 회의실 CRUD: GET/POST/PUT/DELETE /api/admin/rooms
+- 예약: RPC `create_reservation`, `cancel_reservation`, `get_my_reservations` 사용
+
+## 7. 데이터 일관성/규칙
+- 중복 예약: DB 레벨 GIST EXCLUDE 제약으로 차단(활성 상태 한정)
+- 시간 유효성: end_time > start_time
+- 민감정보: 예약 비밀번호는 해시 저장(DB)·응답에서 제외
+
+## 8. 비기능 요구
+- 성능: 초기 로드 ≤ 2s, 실시간 반영 ≤ 1s 체감
+- 안정성: 오류 메시지 명확, 폼 검증 클라/서버 이중화
+- 접근성: 키보드 탭 이동 가능, 색 대비 준수
+- 보안: HTTPS, 쿠키 HttpOnly/SameSite, 서버 비밀키 분리
+
+## 9. 준비/완료 정의(DoR/DoD)
+- DoR: 화면 와이어프레임, 필드/검증 표, API 스키마, 빈/에러 상태 문구 확정
+- DoD: 단위/통합 테스트 통과, 핵심 플로우 수동 시나리오 체크, 문서/환경변수/릴리즈 체크리스트 완료
+
+## 10. 테스트 계획(핵심 케이스)
+- 예약 생성: 형식 오류, 겹침 시간대, 경계 시간(정각/마지막 슬롯)
+- 내 예약 조회: 없는 계정/잘못된 비밀번호/정상 조회
+- 관리자: 로그인 실패/성공, 회의실 중복 이름/음수 capacity/정상 CRUD
+- 실시간: 예약/회의실 변경 시 목록 자동 갱신 여부
+
+## 11. 롤아웃/운영
+- 환경변수: ADMIN_USERNAME/PASSWORD, Supabase URL/Keys 사전 준비
+- 마이그레이션 순서: 테이블→인덱스/제약→뷰→RPC→RLS
+- 롤백: RPC/뷰/제약 단계별 역순 제거 스크립트 준비
+
+## 12. 리스크/대응
+- ENV 인증의 한계: vNext에서 관리자 계정 DB화+해시 인증 전환
+- 실시간 노이즈: 채널 분리/필터링, 재시도 정책
+- 시간대/현지화: 서버/클라 UTC 일관, UI 로컬 포맷
+
+## 13. 재사용 원칙(1줄)
+타입/스키마(Typescript/Zod)로 계약을 고정하고 서비스 계층 재사용으로 단일 책임을 유지하며, 핵심 경로 테스트를 필수화해 회귀를 방지한다.
+</file>
+
+<file path="doc/qa-checklist.md">
+# QA 체크리스트 (회의실 관리 시스템)
+
+본 체크리스트는 기본/에지/실시간/보안 시나리오를 빠짐없이 검증해 배포 전 오류를 최소화하는 목적입니다.
+
+## 0. 사전 준비
+- [ ] `.env.local` 설정 (`NEXT_PUBLIC_SUPABASE_*`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`)
+- [ ] DB 마이그레이션 적용(테이블/제약/뷰/RPC) 및 에러 없음
+- [ ] 로컬 또는 스테이징 URL 확인(`/`, `/admin/login`)
+
+## 1. 관리자 인증
+- [ ] 잘못된 아이디/비밀번호 → 401, 에러 메시지 노출, 세션 미발급
+- [ ] 올바른 아이디/비밀번호 → `/admin` 리다이렉트, `admin_session` 쿠키 발급
+- [ ] 세션 만료(8h 가정) 또는 로그아웃 시 `/admin` 접근 차단 및 `/admin/login` 리다이렉트
+
+## 2. 회의실 CRUD
+- [ ] 생성: 유효(name/location/capacity>0) → 목록 반영
+- [ ] 중복 이름 → 서버 409/제약 오류 시 사용자에게 명확히 표시(토스트)
+- [ ] 수정: name/location/capacity 변경 → 목록 반영, 실시간 업데이트 트리거
+- [ ] 삭제: 확인 대화 후 삭제, 예약 CASCADE 기대 동작 확인
+
+## 3. 예약 생성/검증
+- [ ] 정상 생성: 유효 폼 값 → 성공 토스트 + 현황 즉시 갱신
+- [ ] 전화 형식 오류(010-0000-0000) → 폼 에러 메시지
+- [ ] 비밀번호 3자 이하 → 폼 에러 메시지
+- [ ] 종료≤시작 → 폼/서버 에러 메시지
+- [ ] 중복 시간대(같은 방/날짜) → 서버 에러(제약) 처리 및 사용자 알림
+- [ ] 경계 시간(첫/마지막 슬롯) → 올바르게 처리
+
+## 4. 내 예약 조회/취소
+- [ ] 전화/비번 불일치 → 목록 0 또는 에러 처리 일관성 확인
+- [ ] 정상 조회 → 본인 것만 시간 오름차순
+- [ ] 취소 성공 → 상태 cancelled, 현황 즉시 갱신
+
+## 5. 실시간 반영
+- [ ] 다른 클라이언트에서 예약/취소/회의실 변경 시 목록 자동 갱신
+- [ ] 구독 해제/재연결 시에도 메모리 누수 없이 정상 동작
+
+## 6. 보안/권한
+- [ ] `/admin/*` 미로그인 접근 차단(middleware)
+- [ ] 관리자 API 인증 없이 호출 시 401
+- [ ] 민감정보(예약 비번 해시) 응답에 노출되지 않음
+- [ ] 쿠키 속성(HttpOnly, SameSite, Secure in prod) 확인
+
+## 7. 성능/UX
+- [ ] 첫 로드 2초 이내, 실시간 반영 체감 1초 내
+- [ ] 빈 상태/에러 상태 한글 문구 자연스러움
+- [ ] 모바일 해상도(375px)에서 주요 플로우 사용 가능
+
+## 8. 회귀 포인트
+- [ ] 관리자 로그인 변경(ID/PW) 이후 기존 기능 회귀 없음
+- [ ] 시간대 유틸/검증 로직 변경 시 예약·현황 동시 확인
+
+---
+검증 완료 후 체크리스트와 이슈를 함께 보관해 다음 릴리즈의 기준선으로 활용하세요.
+</file>
+
+<file path="doc/test-data.md">
+# 테스트 데이터 시트 (로컬/스테이징 공통)
+
+## 1) 회의실 기본 데이터
+| name  | location | capacity |
+|-------|----------|----------|
+| A실   | 1F       | 6        |
+| B실   | 2F       | 8        |
+| C실   | 3F       | 10       |
+| D실   | 4F       | 4        |
+| E실   | 5F       | 12       |
+
+적용 절차: 관리자 로그인 → 회의실 생성 5건 입력(중복 이름 검증 포함)
+
+## 2) 예약 생성 케이스(동일 날짜 예: 2025-09-20)
+- 정상 예약(겹침 없음)
+  - 방: A실, 09:00~09:30, 홍길동, 010-1111-1111, pw: 1111
+  - 방: A실, 09:30~10:00, 김철수, 010-2222-2222, pw: 2222
+- 겹침 예약(실패 기대)
+  - 방: A실, 09:15~09:45, 아무개, 010-3333-3333, pw: 3333 → DB 제약 에러
+- 형식 오류(실패 기대)
+  - 전화: 010-12-1234 → 폼 검증 실패
+  - 비밀번호: 123 → 폼 검증 실패
+  - 종료≤시작: 10:00~09:30 → 폼/서버 에러
+
+## 3) 내 예약 조회/취소
+- 조회: 전화 010-1111-1111, 비번 1111 → 본인 09:00~09:30만 표시
+- 취소: 위 예약을 취소 → 상태 cancelled, 현황 즉시 갱신 확인
+- 잘못된 비번으로 취소 시도 → 실패 메시지 확인
+
+## 4) 실시간 검증(두 브라우저 탭)
+- 탭A에서 예약 생성/취소 → 탭B 목록 자동 갱신
+- 관리자에서 회의실 수정(이름/용량) → 사용자 화면에 즉시 반영 확인
+
+## 5) 회귀/경계
+- 마지막 슬롯(17:30~18:00) 예약 생성/취소
+- 같은 날/다른 방으로 동일 시간대 동시 예약 가능 확인
+- 삭제된 방에 대한 예약 CASCADE 동작 확인
+
+이 데이터 시트로 기본/에지 시나리오를 빠르게 재현하세요.
+</file>
+
+<file path="doc/trd2.md">
+# TRD v2 - 회의실 관리 시스템 (상세)
+
+현재 구현을 기준으로, 개발 시 오류를 최소화하기 위한 기술 요구사항을 세분화합니다.
+
+## 1. 기술 스택/버전
+- Next.js 15(App Router, Middleware), React 19, TypeScript 5
+- Tailwind 3 + shadcn-ui
+- Supabase: PostgreSQL 15+, Realtime, RPC, RLS(차후 활성화 예정)
+- 테스트: Vitest + @testing-library/react, jsdom
+
+## 2. 레이어/경계
+- Presentation(UI): App Router pages/components (클라 UI 로직 최소화, 폼 검증은 Zod 병행)
+- Services: `src/lib/services/*` 비즈니스 로직(데이터 집계, 변환, 호출)
+- Data Access: Supabase client/server/service 클라이언트
+- Cross-cutting: 인증/미들웨어, 타입, 유틸, 로깅
+
+## 3. 디렉터리 구조(상세)
+```
+src/
+  app/
+    admin/login/page.tsx           # 관리자 로그인 UI
+    admin/page.tsx                 # 관리자 회의실 CRUD
+    api/admin/auth/route.ts        # 인증 API(ID/PW → admin_session)
+    api/admin/rooms/route.ts       # 회의실 CRUD API
+    my-reservations/page.tsx       # 내 예약 조회/취소
+    page.tsx                       # 메인(예약 현황/생성)
+    layout.tsx, providers.tsx, globals.css
+  lib/
+    auth/admin.ts                  # 세션 쿠키 가드
+    services/{rooms,reservations}.ts
+    supabase/{client,server,service}.ts
+    utils.ts
+  types/{database.ts,index.ts}
+  middleware.ts                    # /admin 가드
+```
+
+## 4. 데이터 모델/DDL(권장 스키마)
+```sql
+CREATE TABLE IF NOT EXISTS meeting_rooms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL UNIQUE,
+  location VARCHAR(200) NOT NULL,
+  capacity INTEGER NOT NULL CHECK (capacity > 0),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS reservations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_id UUID NOT NULL REFERENCES meeting_rooms(id) ON DELETE CASCADE,
+  reservation_date DATE NOT NULL,
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  reserver_name VARCHAR(50) NOT NULL,
+  reserver_phone VARCHAR(20) NOT NULL,
+  password_hash TEXT NOT NULL,
+  status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active','cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 성능/무결성
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+ALTER TABLE reservations
+  ADD CONSTRAINT reservations_end_after_start CHECK (end_time > start_time);
+DO $$ BEGIN
+  ALTER TABLE reservations
+  ADD CONSTRAINT no_overlap EXCLUDE USING GIST (
+    room_id WITH =,
+    reservation_date WITH =,
+    tsrange((reservation_date::timestamp + start_time), (reservation_date::timestamp + end_time)) WITH &&
+  ) WHERE (status='active');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- updated_at 트리거(옵션)
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+DO $$ BEGIN
+  CREATE TRIGGER tr_upd_rooms BEFORE UPDATE ON meeting_rooms FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+  CREATE TRIGGER tr_upd_resv  BEFORE UPDATE ON reservations  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 공개 조회용 뷰(민감정보 제외)
+CREATE OR REPLACE VIEW public_reservations AS
+  SELECT id, room_id, reservation_date, start_time, end_time, status, created_at, updated_at
+  FROM reservations;
+```
+
+## 5. RPC 정의(권장 사양)
+```sql
+-- create_reservation(p_room_id, p_date, p_start, p_end, p_name, p_phone, p_password)
+-- 내부에서 bcrypt 해시 저장, 충돌 시 에러 반환
+-- cancel_reservation(p_id, p_phone, p_password)
+-- 비밀번호/전화 검증 후 status='cancelled'
+-- get_my_reservations(p_phone, p_password)
+-- 비밀번호 검증 후 본인 예약 목록 반환
+```
+
+## 6. 인증/세션
+- API: POST /api/admin/auth { username, password } → 200 { ok } | 401 { error }
+- 쿠키: `admin_session`(HttpOnly, SameSite=Lax, Secure in prod, Max-Age=8h)
+- 미들웨어: `/admin/*` 접근 시 `admin_session` 없으면 `/admin/login`으로 리다이렉트
+- ENV: `ADMIN_USERNAME`, `ADMIN_PASSWORD` (추후 DB 인증으로 전환 계획)
+
+## 7. API 명세(정형)
+- 회의실 목록 GET `/api/admin/rooms`
+  - 200 { data: Room[] } | 401 { error }
+- 회의실 생성 POST `/api/admin/rooms`
+  - body: { name: string(1..100), location: string(1..200), capacity: int>0 }
+  - 201 { data: Room } | 400 { error } | 401 | 500
+- 회의실 수정 PUT `/api/admin/rooms`
+  - body: { id: uuid, name?, location?, capacity? }
+  - 200 { data: Room } | 400 | 401 | 500
+- 회의실 삭제 DELETE `/api/admin/rooms?id=uuid`
+  - 200 { ok: true } | 400 | 401 | 500
+
+오류 포맷: `{ error: string | ZodErrorFlatten }`
+
+## 8. 검증/에러 매핑
+- 클라이언트: Zod 스키마로 사전 검증, 에러 메시지 한국어 통일
+- 서버: Zod + DB 에러 문자열 매핑(중복 키 → "이미 존재", 제약 위반 → "시간 겹침")
+- 토스트: 성공/실패 통일 메시지, 상세는 콘솔/로그로 남김
+
+## 9. 실시간 설계
+- 채널: `reservations:realtime`, `meeting_rooms:realtime`
+- 이벤트: `*` -> 목록 재조회(날짜 필터 동기화)
+- 언서브스크립션: 컴포넌트 언마운트 시 removeChannel 호출
+
+## 10. 환경변수/설정
+- 공개: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- 서버: `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`
+- 예시: `.env.example` 동기화, 로컬 `.env.local`에서 값 주입
+
+## 11. 테스트 전략
+- 단위: 서비스/유틸(Zod 스키마, 시간 겹침, 슬롯 생성)
+- 컴포넌트: 로그인/회의실 CRUD/예약 폼 상호작용
+- 통합(모킹): fetch/Supabase 클라이언트 모킹, Realtime 콜백 시 재조회 호출 검증
+- 케이스: 에지(마지막 슬롯, 동일 시작/끝, 전화 형식, 중복 이름)
+
+## 12. 보안/성능
+- HTTPS 전제, 쿠키 보안 속성 설정, 민감정보 미노출
+- 비밀번호 해시(DB), 세션 추후 서명/JWT 고려
+- 성능: 목록 쿼리 인덱스, N+1 방지(뷰/집계), 불필요 렌더 최소화
+
+## 13. 배포/릴리즈 체크리스트
+- [ ] ENV 구성(ADMIN_*, SUPABASE_*)
+- [ ] DB 마이그레이션(테이블→제약/인덱스→뷰→RPC→RLS)
+- [ ] Smoke 테스트(로그인/CRUD/예약/실시간)
+- [ ] 롤백 스크립트 준비
+
+## 14. 마이그레이션/롤백 전략
+- 전진: DDL → 뷰 → RPC → 앱 배포 → 모니터링
+- 롤백: 앱 중지 → RPC/뷰/제약 제거 → 스키마 원복 → 앱 재시작
+
+## 15. 재사용 원칙(1줄)
+타입/스키마 고정(Zod/TS) + 서비스 레이어 재사용 + 핵심 경로 테스트로 회귀 최소화.
 </file>
 
 <file path="doc/userflow.mdc">
@@ -950,6 +1121,69 @@ const handleAction = async () => {
 이 유저플로우는 TypeScript와 Next.js App Router를 기반으로 한 안정적이고 사용자 친화적인 회의실 관리 시스템 구현을 위한 상세하고 실용적인 가이드라인을 제공합니다.
 </file>
 
+<file path="error">
+오류 의미
+이 오류는 다음과 같은 상황에서 발생합니다:
+
+단일 객체를 기대했지만 여러 개의 결과가 반환됨
+.single() 메서드를 사용했는데 쿼리 결과가 0개 또는 2개 이상임
+고유하지 않은 조건으로 데이터를 조회할 때
+
+해결 방법
+1. 코드에서 .single() 제거 또는 변경
+문제가 되는 코드:
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName)
+  .single(); // 이 부분이 문제
+해결 방법 1 - 배열로 받기:
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName); // .single() 제거
+
+// data는 배열이므로 첫 번째 요소 사용
+const room = data?.[0];
+해결 방법 2 - 고유 조건 사용:
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('id', roomId) // ID는 고유하므로 안전
+  .single();
+2. 조건부로 .single() 사용
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName);
+
+if (error) {
+  console.error('쿼리 오류:', error);
+  return;
+}
+
+if (data.length === 1) {
+  const room = data[0]; // 단일 결과 처리
+} else if (data.length > 1) {
+  console.log('여러 개의 결과가 있습니다:', data);
+} else {
+  console.log('결과가 없습니다');
+}
+3. 오류 처리 개선
+javascriptconst { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .eq('name', roomName)
+  .maybeSingle(); // 0개 또는 1개 결과를 예상할 때 사용
+디버깅 팁
+
+브라우저 개발자 도구에서 네트워크 탭 확인
+Supabase 대시보드에서 직접 쿼리 테스트
+데이터 중복 여부 확인 (같은 이름의 회의실이 여러 개 있는지)
+
+현재 화면에서 "수정" 버튼을 클릭할 때 이 오류가 발생하는 것으로 보이니, 해당 버튼의 클릭 핸들러에서 .single() 사용 부분을 확인하고 위의 방법으로 수정하시면 됩니다.
+</file>
+
 <file path="eslint.config.mjs">
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -1008,268 +1242,646 @@ const config = {
 export default config;
 </file>
 
-<file path="src/app/admin/login/page.tsx">
+<file path="src/app/admin/login/page.test.tsx">
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import AdminLoginPage from './page';
+import { vi } from 'vitest';
+
+// Mock global fetch
+global.fetch = vi.fn();
+
+// Mock window.location
+const originalLocation = window.location as any;
+Object.defineProperty(window, 'location', {
+  configurable: true,
+  value: { ...originalLocation, href: '' },
+});
+
+describe('AdminLoginPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (window.location as any).href = '';
+  });
+
+  it('redirects to /admin on successful login', async () => {
+    (fetch as unknown as vi.Mock).mockResolvedValueOnce({ ok: true });
+    render(<AdminLoginPage />);
+
+    fireEvent.change(screen.getByLabelText('아이디'), { target: { value: 'joonake' } });
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: '1234' } });
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/admin/auth', expect.any(Object));
+    });
+    await waitFor(() => {
+      expect((window.location as any).href).toBe('/admin');
+    });
+  });
+
+  it('shows error message on failed login', async () => {
+    (fetch as unknown as vi.Mock).mockResolvedValueOnce({
+      ok: false,
+      json: () => Promise.resolve({ error: '아이디 또는 비밀번호가 올바르지 않습니다' }),
+    });
+    render(<AdminLoginPage />);
+
+    fireEvent.change(screen.getByLabelText('아이디'), { target: { value: 'wrong' } });
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'wrong' } });
+    fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('아이디 또는 비밀번호가 올바르지 않습니다')).toBeInTheDocument();
+    });
+    expect((window.location as any).href).not.toBe('/admin');
+  });
+});
+</file>
+
+<file path="src/app/admin/reservers/page.tsx">
 'use client';
 
-import { useState } from 'react';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import React, { useState, useEffect } from 'react';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import type { Reservation } from '@/types';
 
-export default function AdminLoginPage() {
-  const [token, setToken] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+type Reserver = {
+  reserver_phone: string;
+  reserver_name: string;
+  reservation_count: number;
+};
 
-  const login = async () => {
+type ReservationDetail = Reservation & {
+  room?: { name: string; location: string } | null;
+};
+
+export default function AdminReserversPage() {
+  const { toast } = useToast();
+  const [reservers, setReservers] = useState<Reserver[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedReserver, setSelectedReserver] = useState<Reserver | null>(null);
+  const [details, setDetails] = useState<ReservationDetail[]>([]);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+
+  const fetchReservers = async () => {
     setLoading(true);
-    setError(null);
-    const res = await fetch('/api/admin/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    });
-    setLoading(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error || '로그인 실패');
+    try {
+      const response = await fetch('/api/admin/reservers');
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || 'Failed to fetch reservers');
+      }
+      const { data } = await response.json();
+      setReservers(data || []);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchReservers();
+  }, []);
+
+  const handleViewDetails = async (reserver: Reserver) => {
+    if (selectedReserver?.reserver_phone === reserver.reserver_phone) {
+      setSelectedReserver(null);
+      setDetails([]);
       return;
     }
-    window.location.href = '/admin';
+
+    setSelectedReserver(reserver);
+    setDetailsLoading(true);
+    try {
+      const response = await fetch(`/api/admin/reservers/${reserver.reserver_phone}`);
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || 'Failed to fetch details');
+      }
+      const { data } = await response.json();
+      setDetails(data || []);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setDetailsLoading(false);
+    }
   };
+
+  const handleDelete = async (phone: string, name: string, count: number) => {
+    if (!window.confirm(`Are you sure you want to delete all ${count} reservations for ${name}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/admin/reservers/${phone}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || 'Failed to delete');
+      }
+      toast({
+        title: 'Success',
+        description: 'All reservations for this user have been deleted.',
+      });
+      fetchReservers(); // Refresh the list
+      setSelectedReserver(null);
+      setDetails([]);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  return (
+    <div>
+      {loading ? (
+        <p>Loading...</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-1">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Count</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {reservers.map((reserver) => (
+                  <TableRow
+                    key={reserver.reserver_phone}
+                    className={selectedReserver?.reserver_phone === reserver.reserver_phone ? 'bg-muted/50' : ''}
+                  >
+                    <TableCell>{reserver.reserver_name}</TableCell>
+                    <TableCell>{reserver.reserver_phone}</TableCell>
+                    <TableCell>{reserver.reservation_count}</TableCell>
+                    <TableCell>
+                      <Button variant="outline" size="sm" onClick={() => handleViewDetails(reserver)}>
+                        View
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="md:col-span-2">
+            {selectedReserver && (
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold">
+                    Details for {selectedReserver.reserver_name} ({selectedReserver.reserver_phone})
+                  </h2>
+                  <Button
+                    variant="destructive"
+                    onClick={() => handleDelete(selectedReserver.reserver_phone, selectedReserver.reserver_name, selectedReserver.reservation_count)}
+                  >
+                    Delete All
+                  </Button>
+                </div>
+                {detailsLoading ? (
+                  <p>Loading details...</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Room ID</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {details.map((res) => (
+                        <TableRow key={res.id}>
+                          <TableCell>{res.reservation_date}</TableCell>
+                          <TableCell>{res.start_time.slice(0,5)} - {res.end_time.slice(0,5)}</TableCell>
+                          <TableCell>{res.room_id}</TableCell>
+                          <TableCell>{res.status}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/api/admin/reservers/[phone]/route.ts">
+import { NextResponse } from 'next/server';
+import { createPureClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth/admin';
+
+export async function GET(req: Request, { params }: { params: { phone: string } }) {
+  const adminErr = requireAdmin(req as any);
+  if (adminErr) return adminErr;
+
+  const phone = params.phone;
+  if (!phone) {
+    return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+  }
+
+  const supabase = await createPureClient();
+  const { data, error } = await supabase.rpc('admin_get_reservations_for_phone', { p_phone: phone });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ data });
+}
+
+export async function DELETE(req: Request, { params }: { params: { phone: string } }) {
+  const adminErr = requireAdmin(req as any);
+  if (adminErr) return adminErr;
+
+  const phone = params.phone;
+  if (!phone) {
+    return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
+  }
+
+  const supabase = await createPureClient();
+  const { error } = await supabase.rpc('admin_delete_all_for_phone', { p_phone: phone });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}
+</file>
+
+<file path="src/app/api/admin/reservers/route.ts">
+import { NextResponse } from 'next/server';
+import { createPureClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth/admin';
+
+export async function GET(req: Request) {
+  const adminErr = requireAdmin(req as any);
+  if (adminErr) return adminErr;
+
+  const supabase = await createPureClient();
+  const { data, error } = await supabase.rpc('admin_get_reservers');
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ data });
+}
+</file>
+
+<file path="src/app/api/auth/login/route.ts">
+import { NextResponse } from 'next/server';
+import { createPureClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+
+export async function POST(req: Request) {
+  try {
+    const { phone, password } = await req.json();
+    if (!phone || !password) {
+      return NextResponse.json({ error: 'Phone and password are required' }, { status: 400 });
+    }
+
+    const supabase = await createPureClient();
+    const { data: user, error } = await supabase.rpc('login', {
+      p_phone: phone,
+      p_password: password,
+    });
+
+    if (error || !user) {
+      return NextResponse.json({ error: 'Invalid phone number or password' }, { status: 401 });
+    }
+
+    // Set a session cookie
+    const sessionData = JSON.stringify({ userId: user.id, name: user.name });
+    cookies().set('user_session', sessionData, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 60 * 60 * 24 * 7, // 1 week
+      path: '/',
+    });
+
+    return NextResponse.json({ data: { id: user.id, name: user.name, phone: user.phone } });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="src/app/api/auth/logout/route.ts">
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+
+export async function POST(req: Request) {
+  try {
+    cookies().set('user_session', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: -1, // Expire the cookie
+      path: '/',
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="src/app/api/auth/reset-password/route.ts">
+import { NextResponse } from 'next/server';
+import { createPureClient } from '@/lib/supabase/server';
+
+export async function POST(req: Request) {
+  try {
+    const { phone, newPassword } = await req.json();
+    if (!phone || !newPassword) {
+      return NextResponse.json({ error: 'Phone number and new password are required' }, { status: 400 });
+    }
+
+    const supabase = await createPureClient();
+
+    const { error } = await supabase.rpc('reset_password', {
+      p_phone: phone,
+      p_new_password: newPassword,
+    });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="src/app/api/auth/signup/route.ts">
+import { NextResponse } from 'next/server';
+import { createPureClient } from '@/lib/supabase/server';
+
+export async function POST(req: Request) {
+  try {
+    const { name, phone, password } = await req.json();
+    if (!name || !phone || !password) {
+      return NextResponse.json({ error: 'Name, phone, and password are required' }, { status: 400 });
+    }
+
+    const supabase = await createPureClient();
+    const { data, error } = await supabase.rpc('signup', {
+      p_name: name,
+      p_phone: phone,
+      p_password: password,
+    });
+
+    if (error) {
+      if (error.code === '23505') { // Unique violation
+        return NextResponse.json({ error: '이미 가입된 전화번호입니다.' }, { status: 409 });
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ data });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="src/app/api/reservations/[id]/route.ts">
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { cookies } from 'next/headers';
+
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+  try {
+    const reservationId = params.id;
+    if (!reservationId) {
+      return NextResponse.json({ error: 'Reservation ID is required' }, { status: 400 });
+    }
+
+    const cookieStore = cookies();
+    const sessionCookie = cookieStore.get('user_session');
+    if (!sessionCookie) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const session = JSON.parse(sessionCookie.value);
+    const userId = session?.userId;
+    if (!userId) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    }
+
+    const supabase = createServiceClient();
+    const { error } = await supabase.rpc('cancel_reservation_authed', {
+      p_reservation_id: reservationId,
+      p_user_id: userId,
+    });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="src/app/api/reservations/route.ts">
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { cookies } from 'next/headers';
+
+export async function POST(req: Request) {
+  try {
+    // 1. Check for user session
+    const cookieStore = cookies();
+    const sessionCookie = cookieStore.get('user_session');
+    if (!sessionCookie) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+    const session = JSON.parse(sessionCookie.value);
+    const userId = session?.userId;
+    if (!userId) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    }
+
+    // 2. Get reservation details from request body
+    const { room_id, reservation_date, start_time, end_time } = await req.json();
+    if (!room_id || !reservation_date || !start_time || !end_time) {
+      return NextResponse.json({ error: 'Missing required reservation details' }, { status: 400 });
+    }
+
+    // 3. Call the authenticated RPC
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.rpc('create_reservation_authed', {
+      p_room_id: room_id,
+      p_date: reservation_date,
+      p_start: start_time,
+      p_end: end_time,
+      p_user_id: userId,
+    });
+
+    if (error) {
+      const message = error?.message || '?ě˝ ě˛ëŚŹ ě¤??¤ëĽę° ë°ě?ěľ?ë¤.';
+      const duplicateConflict = /overlap/i.test(message) || /conflict/i.test(message);
+      const finalMessage = duplicateConflict ? '? í?ě  ?ę°??ë ?´ë? ?ě˝???ěľ?ë¤.' : message;
+      return NextResponse.json({ error: finalMessage }, { status: 400 });
+    }
+
+    return NextResponse.json({ data });
+
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="src/app/forgot-password/page.tsx">
+'use client';
+
+import React, { useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/hooks/use-toast';
+import Link from 'next/link';
+
+export default function ForgotPasswordPage() {
+  const { toast } = useToast();
+  const [phone, setPhone] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone || !newPassword) {
+      toast({
+        description: 'Please enter your phone number and a new password.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, newPassword }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || 'Failed to reset password.');
+      }
+
+      setSuccess(true);
+      toast({
+        title: 'Success',
+        description: 'Your password has been reset for all reservations.',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (success) {
+    return (
+      <div className="max-w-md mx-auto p-6 text-center">
+        <h1 className="text-2xl font-semibold mb-4">Password Reset Successful</h1>
+        <p className="text-muted-foreground mb-4">
+          Your password has been successfully reset. You can now use your new password to check your reservations.
+        </p>
+        <Link href="/my-reservations">
+          <Button>Go to My Reservations</Button>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-md mx-auto p-6">
-      <h1 className="text-2xl font-semibold mb-4">관리자 로그인</h1>
-      <Card className="p-4 space-y-3">
-        <div className="space-y-1">
-          <Label htmlFor="token">관리자 토큰</Label>
-          <Input id="token" value={token} onChange={(e) => setToken(e.target.value)} type="password" />
-        </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex justify-end">
-          <Button onClick={login} disabled={loading}>{loading ? '로그인 중...' : '로그인'}</Button>
-        </div>
+      <h1 className="text-2xl font-semibold text-center mb-6">비밀번호 찾기</h1>
+      <p className="text-center text-sm text-muted-foreground mb-6">
+        전화번호와 새 비밀번호를 입력하세요. 이 전화번호와 연결된 모든 예약의 비밀번호가 재설정됩니다.
+      </p>
+      <Card className="p-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="phone">전화번호</Label>
+            <Input
+              id="phone"
+              placeholder="010-0000-0000"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="new-password">새 비밀번호</Label>
+            <Input
+              id="new-password"
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? '재설정 중...' : '비밀번호 재설정'}
+          </Button>
+        </form>
       </Card>
+      <div className="text-center mt-4">
+        <Link href="/my-reservations" className="text-sm text-muted-foreground hover:underline">
+          예약 조회로 돌아가기
+        </Link>
+      </div>
     </div>
   );
-}
-</file>
-
-<file path="src/app/admin/page.tsx">
-'use client';
-
-import { useEffect, useState, useCallback } from 'react';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { createClient } from '@/lib/supabase/client';
-
-interface RoomForm { id?: string; name: string; location: string; capacity: number }
-
-export default function AdminPage() {
-  const [rooms, setRooms] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [unauthorized, setUnauthorized] = useState(false);
-  const [form, setForm] = useState<RoomForm>({ name: '', location: '', capacity: 4 });
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch('/api/admin/rooms');
-    const json = await res.json();
-    setLoading(false);
-    if (res.status === 401) {
-      setUnauthorized(true);
-      return;
-    }
-    if (!res.ok) return alert(json.error || '불러오기 실패');
-    setRooms(json.data);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Realtime subscription
-  useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase
-      .channel('meeting_rooms:realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_rooms' }, () => {
-        load();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [load]);
-
-  const submit = async () => {
-    const method = form.id ? 'PUT' : 'POST';
-    const res = await fetch('/api/admin/rooms', {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    const json = await res.json();
-    if (!res.ok) return alert(json.error || '저장 실패');
-    setForm({ name: '', location: '', capacity: 4 });
-    load();
-  };
-
-  const remove = async (id: string) => {
-    if (!confirm('삭제하시겠습니까? 관련 예약이 함께 삭제됩니다.')) return;
-    const res = await fetch('/api/admin/rooms?id=' + id, { method: 'DELETE' });
-    const json = await res.json();
-    if (!res.ok) return alert(json.error || '삭제 실패');
-    load();
-  };
-
-  return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">관리자 - 회의실 관리</h1>
-      {unauthorized && (
-        <Card className="p-4 text-sm">
-          관리자 권한이 필요합니다. <a className="underline" href="/admin/login">로그인 페이지로 이동</a>
-        </Card>
-      )}
-
-      <Card className="p-4 space-y-3">
-        <h2 className="font-medium">회의실 생성/수정</h2>
-        <div className="grid md:grid-cols-3 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="room-name">이름</Label>
-            <Input id="room-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="room-location">위치</Label>
-            <Input id="room-location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="room-capacity">수용 인원</Label>
-            <Input id="room-capacity" type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: Number(e.target.value || 0) })} />
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={submit} data-testid="submit-button">{form.id ? '수정' : '생성'}</Button>
-          {form.id && <Button variant="secondary" onClick={() => setForm({ name: '', location: '', capacity: 4 })}>취소</Button>}
-        </div>
-      </Card>
-
-      <Card className="p-4 space-y-3">
-        <h2 className="font-medium">회의실 목록</h2>
-        {loading ? (
-          <p className="text-sm text-muted-foreground">불러오는 중...</p>
-        ) : unauthorized ? (
-          <p className="text-sm text-muted-foreground">권한이 없습니다.</p>
-        ) : (
-          <ul className="divide-y">
-            {rooms.map((r: any) => (
-              <li key={r.id} className="flex items-center justify-between py-2">
-                <div className="text-sm">
-                  <div className="font-medium">{r.name}</div>
-                  <div className="text-muted-foreground">{r.location} · {r.capacity}인</div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="secondary" onClick={() => setForm({ id: r.id, name: r.name, location: r.location, capacity: r.capacity })}>수정</Button>
-                  <Button variant="destructive" onClick={() => remove(r.id)}>삭제</Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-    </div>
-  );
-}
-</file>
-
-<file path="src/app/api/admin/auth/route.ts">
-import 'server-only';
-import { NextRequest, NextResponse } from 'next/server';
-
-export async function POST(req: NextRequest) {
-  const { token } = await req.json().catch(() => ({ token: undefined }));
-  const expected = process.env.ADMIN_TOKEN;
-  if (!expected) return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
-  if (!token || token !== expected) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set('admin_token', expected, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-    maxAge: 60 * 60 * 8, // 8 hours
-  });
-  return res;
-}
-
-export async function DELETE() {
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set('admin_token', '', { httpOnly: true, maxAge: 0, path: '/' });
-  return res;
-}
-</file>
-
-<file path="src/app/api/admin/rooms/route.ts">
-import 'server-only';
-import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import { createServiceClient } from '@/lib/supabase/service';
-import { requireAdmin } from '@/lib/auth/admin';
-
-const createSchema = z.object({
-  name: z.string().min(1),
-  location: z.string().min(1),
-  capacity: z.number().int().positive(),
-});
-
-export async function GET(req: NextRequest) {
-  const unauth = requireAdmin(req);
-  if (unauth) return unauth;
-  const supabase = createServiceClient();
-  const { data, error } = await supabase.from('meeting_rooms').select('*').order('name');
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data });
-}
-
-export async function POST(req: NextRequest) {
-  const unauth = requireAdmin(req);
-  if (unauth) return unauth;
-  const payload = await req.json();
-  const parsed = createSchema.safeParse(payload);
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  const supabase = createServiceClient();
-  const { data, error } = await supabase.from('meeting_rooms').insert(parsed.data).select('*').single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data }, { status: 201 });
-}
-
-export async function PUT(req: NextRequest) {
-  const unauth = requireAdmin(req);
-  if (unauth) return unauth;
-  const payload = await req.json();
-  const schema = createSchema.extend({ id: z.string().uuid() });
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  const { id, ...updates } = parsed.data;
-  const supabase = createServiceClient();
-  const { data, error } = await supabase.from('meeting_rooms').update(updates).eq('id', id).select('*').single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data });
-}
-
-export async function DELETE(req: NextRequest) {
-  const unauth = requireAdmin(req);
-  if (unauth) return unauth;
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get('id');
-  if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
-  const supabase = createServiceClient();
-  const { error } = await supabase.from('meeting_rooms').delete().eq('id', id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
 }
 </file>
 
@@ -1345,116 +1957,467 @@ export async function DELETE(req: NextRequest) {
 }
 </file>
 
-<file path="src/app/layout.tsx">
-import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
-import './globals.css';
-import Providers from './providers';
+<file path="src/app/home-client-page.tsx">
+'use client';
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
+import React, { useEffect, useMemo, useState } from 'react';
+import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { generateTimeSlots, isOverlapping } from '@/lib/utils';
+import type { RoomWithReservations, UserSession } from '@/types';
+import { getRoomsWithReservationsByDate } from '@/lib/services/rooms';
+import { createReservation } from '@/lib/services/reservations';
+import { createClient } from '@/lib/supabase/client';
+import { z } from 'zod';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useRouter } from 'next/navigation';
 
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
+// Main component that receives session from server component
+export default function HomePageClient({ session }: { session: UserSession | null }) {
+  const { toast } = useToast();
+  const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [rooms, setRooms] = useState<RoomWithReservations[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
-export const metadata: Metadata = {
-  title: 'Create Next App',
-  description: 'Generated by create next app',
-};
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        const data = await getRoomsWithReservationsByDate(date);
+        if (!cancelled) setRooms(data);
+      } catch (e: any) {
+        toast({ title: '불러오기 실패', description: e?.message ?? '데이터 조회 중 오류', variant: 'destructive' });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [date, toast]);
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('reservations:realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, async () => {
+        const data = await getRoomsWithReservationsByDate(date);
+        setRooms(data);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [date]);
+
   return (
-    <html suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <Providers>{children}</Providers>
-      </body>
-    </html>
+    <div className="max-w-5xl mx-auto p-6 space-y-6">
+       <header className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">회의실 예약</h1>
+          <p className="text-sm text-muted-foreground">날짜별 현황 확인 및 예약</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="date">날짜</Label>
+            <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <Button onClick={() => setDate(new Date().toISOString().slice(0, 10))} variant="secondary">오늘</Button>
+        </div>
+      </header>
+
+      <Separator />
+
+      {loading ? (
+        <p className="text-sm text-muted-foreground">불러오는 중...</p>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-4">
+          {rooms.map((room) => (
+            <Card key={room.id} className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold">{room.name}</p>
+                  <p className="text-xs text-muted-foreground">{room.location} · {room.capacity}인</p>
+                </div>
+                <Sheet open={open && selectedRoomId === room.id} onOpenChange={(o) => setOpen(o)}>
+                  <SheetTrigger asChild>
+                    <Button onClick={() => { setSelectedRoomId(room.id); setOpen(true); }}>예약하기</Button>
+                  </SheetTrigger>
+                  <SheetContent side="right" className="bg-white p-6 rounded-l-md shadow-lg w-full sm:max-w-sm">
+                    <BookingForm
+                      session={session}
+                      date={date}
+                      roomId={room.id}
+                      busy={room.reservations.map(r => ({ start: r.start_time, end: r.end_time }))}
+                      onDone={(ok, msg) => {
+                        setOpen(false);
+                        if (ok) {
+                          toast({ description: '예약이 완료되었습니다.' });
+                          getRoomsWithReservationsByDate(date).then(setRooms);
+                        } else {
+                          toast({ description: msg ?? '예약 실패', variant: 'destructive' });
+                        }
+                      }}
+                    />
+                  </SheetContent>
+                </Sheet>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {room.reservations.length === 0 ? (
+                  <p>예약 없음</p>
+                ) : (
+                  <ul className="flex flex-wrap gap-2">
+                    {room.reservations.map((r) => (
+                      <li key={r.id} className="px-2 py-1 rounded bg-gray-100">
+                        {r.start_time.slice(0,5)}~{r.end_time.slice(0,5)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Booking Form --- //
+
+const loggedInSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+}).refine((data) => data.end > data.start, {
+  message: '종료 시간은 시작 시간보다 늦어야 합니다',
+  path: ['end'],
+});
+
+type BookingFormValues = z.infer<typeof loggedInSchema>;
+
+function BookingForm({
+  session,
+  date,
+  roomId,
+  busy,
+  onDone,
+}: {
+  session: UserSession | null;
+  date: string;
+  roomId: string;
+  busy: { start: string; end: string }[];
+  onDone: (ok: boolean, message?: string) => void;
+}) {
+  const router = useRouter();
+  const timeSlots = useMemo(() => generateTimeSlots(9, 18, 30), []);
+  
+  const {
+    handleSubmit,
+    watch,
+    formState: { errors, isSubmitting },
+    setValue,
+    control,
+  } = useForm<BookingFormValues>({
+    resolver: zodResolver(loggedInSchema),
+    defaultValues: { start: '09:00:00', end: '09:30:00' },
+  });
+
+  const start = watch('start');
+  useEffect(() => {
+    const next = nextSlot(start, timeSlots);
+    if (watch('end') <= start) setValue('end', next);
+  }, [start, timeSlots, watch, setValue]);
+
+  const onSubmit = async (values: BookingFormValues) => {
+    if (!session) return; // Should not happen if button is disabled
+
+    const overlap = busy.some((b) => isOverlapping(values.start, values.end, b.start, b.end));
+    if (overlap) return onDone(false, '해당 시간은 이미 예약되어 있습니다');
+
+    const result = await createReservation({
+      room_id: roomId,
+      reservation_date: date,
+      start_time: values.start,
+      end_time: values.end,
+    });
+
+    if (!result.success) return onDone(false, result.error);
+    onDone(true);
+  };
+
+  const handleLoginRedirect = () => {
+    router.push('/login');
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <SheetHeader>
+        <SheetTitle>예약 생성</SheetTitle>
+        {session && <p className="text-sm text-muted-foreground">{session.name}님, 환영합니다.</p>}
+      </SheetHeader>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label>시작</Label>
+          <Controller
+            control={control}
+            name="start"
+            render={({ field }) => (
+              <Select onValueChange={field.onChange} value={field.value}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {timeSlots.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>종료</Label>
+          <Controller
+            control={control}
+            name="end"
+            render={({ field }) => (
+              <Select onValueChange={field.onChange} value={field.value}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {timeSlots.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          {errors.end && <p className="text-xs text-red-600 mt-1">{errors.end.message}</p>}
+        </div>
+      </div>
+
+      {!session && (
+        <Card className="bg-muted/50 p-4 text-center">
+          <p className="text-sm text-muted-foreground">예약을 하시려면 로그인이 필요합니다.</p>
+        </Card>
+      )}
+
+      <div className="flex justify-end gap-2 pt-4">
+        {session ? (
+          <Button type="submit" disabled={isSubmitting}>{isSubmitting ? '예약 중...' : '예약 확정'}</Button>
+        ) : (
+          <Button type="button" onClick={handleLoginRedirect}>로그인 후 예약</Button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function nextSlot(value: string, slots: { value: string }[]) {
+  const idx = slots.findIndex((s) => s.value === value);
+  return slots[Math.min(slots.length - 1, Math.max(0, idx + 1))].value;
+}
+</file>
+
+<file path="src/app/login/page.tsx">
+'use client';
+
+import React, { useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/hooks/use-toast';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+export default function LoginPage() {
+  const { toast } = useToast();
+  const router = useRouter();
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone || !password) {
+      toast({ description: '전화번호와 비밀번호를 입력해주세요.', variant: 'destructive' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, password }),
+      });
+
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || '로그인에 실패했습니다.');
+      }
+
+      toast({
+        title: '로그인 성공!',
+        description: '성공적으로 로그인되었습니다.',
+      });
+      // Redirect to the home page or my-reservations
+      router.push('/my-reservations');
+      router.refresh(); // This will re-fetch server components and get the new cookie
+    } catch (error: any) {
+      toast({
+        title: '오류',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto p-6">
+      <h1 className="text-2xl font-semibold text-center mb-6">로그인</h1>
+      <Card className="p-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="phone">전화번호</Label>
+            <Input
+              id="phone"
+              placeholder="010-0000-0000"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="password">비밀번호</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? '로그인 중...' : '로그인'}
+          </Button>
+        </form>
+      </Card>
+      <div className="text-center mt-4 space-x-4">
+        <Link href="/signup" className="text-sm text-muted-foreground hover:underline">
+          계정이 없으신가요? 회원가입
+        </Link>
+        <Link href="/forgot-password" className="text-sm text-muted-foreground hover:underline">
+          비밀번호를 잊으셨나요?
+        </Link>
+      </div>
+    </div>
   );
 }
 </file>
 
-<file path="src/app/my-reservations/page.tsx">
+<file path="src/app/my-reservations/client-page.tsx">
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { getMyReservations, cancelReservation } from '@/lib/services/reservations';
+import type { Reservation, UserSession } from '@/types';
 
-export default function MyReservationsPage() {
+type MyReservation = Reservation & {
+  room?: { name: string; location: string; capacity?: number } | null;
+};
+
+export default function MyReservationsClientPage({ session }: { session: UserSession }) {
   const { toast } = useToast();
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [list, setList] = useState<MyReservation[]>([]);
 
-  const handleSearch = async () => {
+  const fetchList = useCallback(async () => {
     setLoading(true);
-    const res = await getMyReservations(phone, password);
-    setLoading(false);
-    if (!res.success) return toast({ description: res.error, variant: 'destructive' });
-    setItems(res.data ?? []);
-    if ((res.data ?? []).length === 0) toast({ description: '예약 내역이 없습니다.' });
-  };
+    try {
+      const result = await getMyReservations();
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      setList((result.data ?? []) as MyReservation[]);
+    } catch (e: any) {
+      console.error(e);
+      toast({ description: e?.message ?? '예약 조회 중 오류가 발생했습니다.', variant: 'destructive' });
+      setList([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    fetchList();
+  }, [fetchList]);
 
   const handleCancel = async (id: string) => {
-    const res = await cancelReservation(id, phone, password);
-    if (!res.success) return toast({ description: res.error, variant: 'destructive' });
+    if (!confirm('해당 예약을 취소하시겠습니까?')) return;
+    const res = await cancelReservation(id);
+    if (!res.success) {
+      toast({ description: res.error ?? '취소 실패', variant: 'destructive' });
+      return;
+    }
     toast({ description: '예약이 취소되었습니다.' });
-    handleSearch();
+    fetchList();
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">내 예약 조회</h1>
+    <div className="max-w-3xl mx-auto space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold">내 예약</h1>
+        <p className="text-sm text-muted-foreground">{session.name}님의 예약 내역입니다.</p>
+      </header>
 
-      <Card className="p-4 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="phone">전화번호</Label>
-            <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="010-0000-0000" />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="password">비밀번호</Label>
-            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          </div>
-        </div>
-        <div className="flex justify-end">
-          <Button onClick={handleSearch} disabled={loading}>{loading ? '조회 중...' : '조회'}</Button>
-        </div>
-      </Card>
-
-      {items.length > 0 && (
-        <Card className="p-4 space-y-2">
-          <p className="text-sm text-muted-foreground">총 {items.length}건</p>
-          <ul className="space-y-2">
-            {items.map((r) => (
-              <li key={r.id} className="flex items-center justify-between border rounded p-2">
-                <div className="text-sm">
-                  <div className="font-medium">{r.reservation_date} · {r.start_time?.slice(0,5)}~{r.end_time?.slice(0,5)}</div>
-                  <div className="text-muted-foreground">상태: {r.status}</div>
+      <div className="space-y-3">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">예약 목록을 불러오는 중...</p>
+        ) : list.length === 0 ? (
+          <p className="text-sm text-muted-foreground">예약 내역이 없습니다.</p>
+        ) : (
+          list
+            .sort((a, b) => (a.reservation_date + a.start_time).localeCompare(b.reservation_date + b.start_time))
+            .map((r) => (
+              <Card key={r.id} className="p-4 flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="font-medium">{r.reservation_date} · {r.start_time.slice(0, 5)}–{r.end_time.slice(0, 5)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    회의실: {r.room?.name ?? r.room_id}
+                    {r.room?.location ? ` · ${r.room?.location}` : ''}
+                  </p>
+                  <p className="text-xs text-muted-foreground">상태: {r.status}</p>
                 </div>
-                {r.status === 'active' && (
-                  <Button variant="secondary" onClick={() => handleCancel(r.id)}>취소</Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+                <div>
+                  {r.status === 'active' ? (
+                    <Button variant="destructive" size="sm" onClick={() => handleCancel(r.id)}>취소</Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">취소됨</span>
+                  )}
+                </div>
+              </Card>
+            ))
+        )}
+      </div>
     </div>
   );
 }
@@ -1516,6 +2479,106 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     >
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </ThemeProvider>
+  );
+}
+</file>
+
+<file path="src/app/signup/page.tsx">
+'use client';
+
+import React, { useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/hooks/use-toast';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+export default function SignupPage() {
+  const { toast } = useToast();
+  const router = useRouter();
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !phone || !password) {
+      toast({ description: '모든 항목을 입력해주세요.', variant: 'destructive' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, phone, password }),
+      });
+
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || '회원가입에 실패했습니다.');
+      }
+
+      toast({
+        title: '성공!',
+        description: '계정이 생성되었습니다. 로그인해주세요.',
+      });
+      router.push('/login');
+    } catch (error: any) {
+      toast({
+        title: '오류',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto p-6">
+      <h1 className="text-2xl font-semibold text-center mb-6">회원가입</h1>
+      <Card className="p-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="name">이름</Label>
+            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="phone">전화번호</Label>
+            <Input
+              id="phone"
+              placeholder="010-0000-0000"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="password">비밀번호</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? '가입 중...' : '가입하기'}
+          </Button>
+        </form>
+      </Card>
+      <div className="text-center mt-4">
+        <Link href="/login" className="text-sm text-muted-foreground hover:underline">
+          이미 계정이 있으신가요? 로그인
+        </Link>
+      </div>
+    </div>
   );
 }
 </file>
@@ -3074,193 +4137,8 @@ function useToast() {
 export { useToast, toast }
 </file>
 
-<file path="src/lib/auth/admin.ts">
-import { NextRequest, NextResponse } from 'next/server';
-
-function getProvidedToken(req: NextRequest) {
-  const header = req.headers.get('x-admin-token');
-  if (header) return header.trim();
-  const auth = req.headers.get('authorization');
-  if (!auth) return null;
-  const m = auth.match(/^Bearer\s+(.*)$/i);
-  return m ? m[1].trim() : null;
-}
-
-export function requireAdmin(req: NextRequest): NextResponse | null {
-  const expected = process.env.ADMIN_TOKEN;
-  if (!expected) {
-    return NextResponse.json(
-      { error: 'Server misconfigured: ADMIN_TOKEN not set' },
-      { status: 500 }
-    );
-  }
-  const token = getProvidedToken(req) || req.cookies.get('admin_token')?.value;
-  if (!token || token !== expected) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  return null;
-}
-</file>
-
-<file path="src/lib/services/reservations.ts">
-import { createClient } from '@/lib/supabase/client';
-import type { CreateReservationData, ServiceResult, Reservation } from '@/types';
-
-export async function createReservation(
-  data: CreateReservationData
-): Promise<ServiceResult<string>> {
-  const supabase = createClient();
-  const { data: row, error } = await supabase.rpc('create_reservation', {
-    p_room_id: data.room_id,
-    p_date: data.reservation_date,
-    p_start: data.start_time,
-    p_end: data.end_time,
-    p_name: data.reserver_name,
-    p_phone: data.reserver_phone,
-    p_password: data.reserver_password,
-  });
-
-  if (error) {
-    return { success: false, error: error.message };
-  }
-  return { success: true, data: row?.id ?? '' };
-}
-
-export async function cancelReservation(
-  id: string,
-  phone: string,
-  password: string
-): Promise<ServiceResult<void>> {
-  const supabase = createClient();
-  const { error } = await supabase.rpc('cancel_reservation', {
-    p_id: id,
-    p_phone: phone,
-    p_password: password,
-  });
-  if (error) return { success: false, error: error.message };
-  return { success: true };
-}
-
-export async function getMyReservations(
-  phone: string,
-  password: string
-): Promise<ServiceResult<Reservation[]>> {
-  const supabase = createClient();
-  const { data, error } = await supabase.rpc('get_my_reservations', {
-    p_phone: phone,
-    p_password: password,
-  });
-  if (error) return { success: false, error: error.message };
-  return { success: true, data: (data ?? []) as Reservation[] };
-}
-</file>
-
-<file path="src/lib/services/rooms.ts">
-import { createClient } from '@/lib/supabase/client';
-import type { Room, RoomWithReservations, Reservation } from '@/types';
-
-export async function getRooms(): Promise<Room[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from('meeting_rooms')
-    .select('*')
-    .order('name');
-  if (error) throw error;
-  return data as Room[];
-}
-
-export async function getReservationsByDate(
-  date: string
-): Promise<Reservation[]> {
-  const supabase = createClient();
-  // Use public view limited to safe columns
-  const { data, error } = await supabase
-    .from('public_reservations')
-    .select('*')
-    .eq('reservation_date', date);
-  if (error) throw error;
-  return data as unknown as Reservation[];
-}
-
-export async function getRoomsWithReservationsByDate(
-  date: string
-): Promise<RoomWithReservations[]> {
-  const [rooms, reservations] = await Promise.all([
-    getRooms(),
-    getReservationsByDate(date),
-  ]);
-  const byRoom = new Map<string, Reservation[]>();
-  reservations.forEach((r) => {
-    const list = byRoom.get(r.room_id) ?? [];
-    list.push(r);
-    byRoom.set(r.room_id, list);
-  });
-  return rooms.map((room) => ({
-    ...room,
-    reservations: (byRoom.get(room.id) ?? []).sort((a, b) =>
-      a.start_time.localeCompare(b.start_time)
-    ),
-  }));
-}
-</file>
-
-<file path="src/lib/supabase/client.ts">
-import { createBrowserClient } from "@supabase/ssr";
-
-export function createClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !/^https?:\/\//.test(url)) {
-    throw new Error(
-      "Missing or invalid NEXT_PUBLIC_SUPABASE_URL. Set it to your https://<project>.supabase.co URL in .env.local or your hosting environment."
-    );
-  }
-  if (!anonKey) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_ANON_KEY. Copy the anon key from Supabase project settings into .env.local or your hosting environment."
-    );
-  }
-
-  return createBrowserClient(url, anonKey);
-}
-</file>
-
-<file path="src/lib/supabase/service.ts">
-import 'server-only';
-import { createClient } from '@supabase/supabase-js';
-
-export function createServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  if (!url || !key) {
-    throw new Error('Missing SUPABASE env (URL or SERVICE_ROLE_KEY)');
-    }
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-</file>
-
-<file path="src/middleware.ts">
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-
-export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-  if (pathname.startsWith('/admin') && !pathname.startsWith('/admin/login')) {
-    const token = req.cookies.get('admin_token')?.value;
-    if (!token) {
-      const url = req.nextUrl.clone();
-      url.pathname = '/admin/login';
-      url.searchParams.set('next', pathname);
-      return NextResponse.redirect(url);
-    }
-  }
-  return NextResponse.next();
-}
-
-export const config = {
-  matcher: ['/admin/:path*'],
-};
+<file path="src/test/setup.ts">
+import '@testing-library/jest-dom';
 </file>
 
 <file path="src/types/database.ts">
@@ -3330,44 +4208,6 @@ export interface Database {
       };
     };
   };
-}
-</file>
-
-<file path="src/types/index.ts">
-import type { Database } from './database';
-
-export type Room = Database['public']['Tables']['meeting_rooms']['Row'];
-export type Reservation = Database['public']['Tables']['reservations']['Row'];
-
-export interface CreateRoomData {
-  name: string;
-  location: string;
-  capacity: number;
-}
-
-export interface CreateReservationData {
-  room_id: string;
-  reservation_date: string; // YYYY-MM-DD
-  start_time: string; // HH:MM:SS
-  end_time: string; // HH:MM:SS
-  reserver_name: string;
-  reserver_phone: string;
-  reserver_password: string;
-}
-
-export interface ServiceResult<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
-
-export interface TimeSlot {
-  start: string; // HH:MM
-  end: string; // HH:MM
-}
-
-export interface RoomWithReservations extends Room {
-  reservations: Reservation[];
 }
 </file>
 
@@ -3891,77 +4731,16 @@ CREATE INDEX IF NOT EXISTS idx_reservations_room_date_time
 </file>
 
 <file path="supabase/migrations/20250915230000_security_hardening.sql">
--- Security hardening (without pgcrypto): column grants, RPCs, public view
+-- Security hardening: hash passwords, column grants, RPCs, and public view
 
--- 1) Column-level access: restrict sensitive columns on reservations
-REVOKE ALL ON TABLE reservations FROM PUBLIC;
-GRANT SELECT (id, room_id, reservation_date, start_time, end_time, status, created_at, updated_at)
-  ON reservations TO anon, authenticated;
+-- 1) Extensions
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 2) Lock down direct INSERT from clients; use RPC instead
-DROP POLICY IF EXISTS reservations_insert_all ON reservations;
-
--- 3) RPCs for create and cancel (store plain password; restrict read via column grants)
-CREATE OR REPLACE FUNCTION public.create_reservation(
-  p_room_id UUID,
-  p_date DATE,
-  p_start TIME,
-  p_end TIME,
-  p_name TEXT,
-  p_phone TEXT,
-  p_password TEXT
-) RETURNS reservations AS $$
-DECLARE
-  r reservations;
-BEGIN
-  IF p_end <= p_start THEN
-    RAISE EXCEPTION 'end_time must be greater than start_time' USING ERRCODE = '22023';
-  END IF;
-
-  INSERT INTO reservations (
-    room_id, reservation_date, start_time, end_time,
-    reserver_name, reserver_phone, reserver_password, status
-  ) VALUES (
-    p_room_id, p_date, p_start, p_end,
-    p_name, p_phone, p_password, 'active'
-  ) RETURNING * INTO r;
-
-  RETURN r;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
-GRANT EXECUTE ON FUNCTION public.create_reservation(UUID, DATE, TIME, TIME, TEXT, TEXT, TEXT)
-  TO anon, authenticated;
-
-CREATE OR REPLACE FUNCTION public.cancel_reservation(
-  p_id UUID,
-  p_phone TEXT,
-  p_password TEXT
-) RETURNS VOID AS $$
-BEGIN
-  UPDATE reservations
-  SET status = 'cancelled'
-  WHERE id = p_id
-    AND reserver_phone = p_phone
-    AND reserver_password = p_password
-    AND status = 'active';
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'invalid reservation info or already cancelled' USING ERRCODE = '22023';
-  END IF;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
-GRANT EXECUTE ON FUNCTION public.cancel_reservation(UUID, TEXT, TEXT)
-  TO anon, authenticated;
-
--- 4) Public view with safe columns only
-CREATE OR REPLACE VIEW public.public_reservations AS
-SELECT id, room_id, reservation_date, start_time, end_time, status, created_at, updated_at
-FROM reservations
-WHERE status = 'active';
-
-GRANT SELECT ON public.public_reservations TO anon, authenticated;
+-- 2) Add password_hash and backfill, then drop plain password
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS password_hash TEXT;
+UPDATE reservations
+SET password_hash = crypt(reserver_password, gen_salt('bf'::text))
+WHERE reserver_password IS NOT NULL AND (password_hash IS NULL OR pas
 </file>
 
 <file path="supabase/migrations/20250915231000_get_my_reservations_rpc.sql">
@@ -4098,6 +4877,449 @@ GRANT EXECUTE ON FUNCTION public.get_my_reservations(TEXT, TEXT)
 -- ALTER TABLE reservations DROP COLUMN IF EXISTS reserver_password;
 </file>
 
+<file path="supabase/migrations/20250916110000_disable_rls_for_dev.sql">
+-- Disabling Row Level Security for development purposes
+ALTER TABLE public.meeting_rooms DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reservations DISABLE ROW LEVEL SECURITY;
+</file>
+
+<file path="supabase/migrations/20250917120000_v2_spec_alignment.sql">
+-- V2 Spec Alignment Migration (idempotent where possible)
+-- Ensures required extensions, constraints, view, and RPCs exist per TRD v2
+
+-- Extensions
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+-- Core tables (safe-guard; no-op if already created)
+CREATE TABLE IF NOT EXISTS public.meeting_rooms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL UNIQUE,
+  location VARCHAR(200) NOT NULL,
+  capacity INTEGER NOT NULL CHECK (capacity > 0),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.reservations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_id UUID NOT NULL REFERENCES public.meeting_rooms(id) ON DELETE CASCADE,
+  reservation_date DATE NOT NULL,
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  reserver_name VARCHAR(50) NOT NULL,
+  reserver_phone VARCHAR(20) NOT NULL,
+  password_hash TEXT NOT NULL,
+  status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active','cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- updated_at triggers
+CREATE OR REPLACE FUNCTION public.set_updated_at() RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+
+DO $$ BEGIN
+  CREATE TRIGGER tr_upd_rooms BEFORE UPDATE ON public.meeting_rooms
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TRIGGER tr_upd_resv BEFORE UPDATE ON public.reservations
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Constraints: end after start
+DO $$ BEGIN
+  ALTER TABLE public.reservations
+  ADD CONSTRAINT reservations_end_after_start CHECK (end_time > start_time);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- No overlapping active reservations per room/date
+DO $$ BEGIN
+  ALTER TABLE public.reservations
+  ADD CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
+    room_id WITH =,
+    reservation_date WITH =,
+    tsrange(
+      (reservation_date::timestamp + start_time),
+      (reservation_date::timestamp + end_time)
+    ) WITH &&
+  ) WHERE (status = 'active');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Public view without sensitive fields
+CREATE OR REPLACE VIEW public.public_reservations AS
+SELECT id, room_id, reservation_date, start_time, end_time, status, created_at, updated_at
+FROM public.reservations;
+
+-- RPC: create_reservation
+CREATE OR REPLACE FUNCTION public.create_reservation(
+  p_room_id UUID,
+  p_date DATE,
+  p_start TIME,
+  p_end TIME,
+  p_name TEXT,
+  p_phone TEXT,
+  p_password TEXT
+) RETURNS TABLE(id UUID) AS $$
+DECLARE v_id UUID; BEGIN
+  INSERT INTO public.reservations (
+    room_id, reservation_date, start_time, end_time,
+    reserver_name, reserver_phone, password_hash
+  ) VALUES (
+    p_room_id, p_date, p_start, p_end,
+    p_name, p_phone, crypt(p_password, gen_salt('bf'))
+  ) RETURNING reservations.id INTO v_id;
+  RETURN QUERY SELECT v_id;
+END; $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- RPC: cancel_reservation
+CREATE OR REPLACE FUNCTION public.cancel_reservation(
+  p_id UUID,
+  p_phone TEXT,
+  p_password TEXT
+) RETURNS VOID AS $$
+BEGIN
+  UPDATE public.reservations r
+  SET status = 'cancelled', updated_at = NOW()
+  WHERE r.id = p_id
+    AND r.reserver_phone = p_phone
+    AND r.status = 'active'
+    AND r.password_hash = crypt(p_password, r.password_hash);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Cancel failed: not found or invalid credentials' USING ERRCODE = 'P0001';
+  END IF;
+END; $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- RPC: get_my_reservations
+CREATE OR REPLACE FUNCTION public.get_my_reservations(
+  p_phone TEXT,
+  p_password TEXT
+) RETURNS SETOF public.reservations AS $$
+BEGIN
+  RETURN QUERY
+  SELECT r.*
+  FROM public.reservations r
+  WHERE r.reserver_phone = p_phone
+    AND r.password_hash = crypt(p_password, r.password_hash)
+  ORDER BY r.reservation_date DESC, r.start_time ASC;
+END; $$ LANGUAGE plpgsql SECURITY DEFINER;
+</file>
+
+<file path="supabase/migrations/20250917121000_rls_policies.sql">
+-- RLS Policies and Privileges (MVP-safe; tighten for production)
+
+-- Enable RLS (idempotent)
+ALTER TABLE IF EXISTS public.meeting_rooms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.reservations ENABLE ROW LEVEL SECURITY;
+
+-- Basic SELECT policies to allow anon to read via view and (for MVP) tables
+DO $$ BEGIN
+  CREATE POLICY meeting_rooms_select_public ON public.meeting_rooms
+  FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY reservations_select_public ON public.reservations
+  FOR SELECT TO anon USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Admin/service write policies (authenticated/service_role)
+DO $$ BEGIN
+  CREATE POLICY meeting_rooms_write_admin ON public.meeting_rooms
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY reservations_write_admin ON public.reservations
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Grants
+GRANT SELECT ON TABLE public.public_reservations TO anon;
+GRANT SELECT ON TABLE public.meeting_rooms TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.meeting_rooms TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.reservations TO authenticated;
+
+-- NOTE:
+-- For production hardening:
+-- 1) Revoke direct SELECT on reservations from anon and expose a SECURITY DEFINER function or restricted view.
+-- 2) Narrow row filters (USING) as business requires.
+-- 3) Separate roles for admin vs general authenticated users.
+</file>
+
+<file path="supabase/migrations/20250917123000_disable_rls_for_prod.sql">
+-- Disable RLS explicitly (takes precedence over earlier enabling)
+ALTER TABLE IF EXISTS public.meeting_rooms DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.reservations DISABLE ROW LEVEL SECURITY;
+
+-- Note: Policies remain defined but are ignored while RLS is disabled.
+-- Grants are unchanged to preserve current app behavior.
+</file>
+
+<file path="supabase/migrations/20250919120000_fix_get_my_reservations.sql">
+-- RPC: get_my_reservations
+CREATE OR REPLACE FUNCTION public.get_my_reservations(
+  p_phone TEXT,
+  p_password TEXT,
+  p_from_date DATE DEFAULT NULL,
+  p_to_date DATE DEFAULT NULL
+) RETURNS SETOF public.reservations AS $$
+BEGIN
+  RETURN QUERY
+  SELECT r.*
+  FROM public.reservations r
+  WHERE r.reserver_phone = p_phone
+    AND r.password_hash = crypt(p_password, r.password_hash)
+    AND (p_from_date IS NULL OR r.reservation_date >= p_from_date)
+    AND (p_to_date IS NULL OR r.reservation_date <= p_to_date)
+  ORDER BY r.reservation_date DESC, r.start_time ASC;
+END; $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.get_my_reservations(TEXT, TEXT, DATE, DATE)
+  TO anon, authenticated;
+</file>
+
+<file path="supabase/migrations/20250919130000_admin_user_management.sql">
+-- supabase/migrations/20250919130000_admin_user_management.sql
+
+-- RPC to get unique reservers
+CREATE OR REPLACE FUNCTION public.admin_get_reservers()
+RETURNS TABLE (
+  reserver_phone TEXT,
+  reserver_name TEXT,
+  reservation_count BIGINT
+) AS $$
+BEGIN
+  -- RLS policies should be used to protect this function.
+  -- For now, we rely on the API layer to perform admin checks.
+
+  RETURN QUERY
+  SELECT
+    r.reserver_phone,
+    MAX(r.reserver_name) as reserver_name,
+    COUNT(r.id) as reservation_count
+  FROM public.reservations r
+  GROUP BY r.reserver_phone
+  ORDER BY MAX(r.created_at) DESC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.admin_get_reservers() TO authenticated, service_role;
+
+-- RPC to get reservations for a specific phone number
+CREATE OR REPLACE FUNCTION public.admin_get_reservations_for_phone(p_phone TEXT)
+RETURNS SETOF public.reservations AS $$
+BEGIN
+  RETURN QUERY
+  SELECT *
+  FROM public.reservations
+  WHERE reserver_phone = p_phone
+  ORDER BY reservation_date DESC, start_time DESC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.admin_get_reservations_for_phone(TEXT) TO authenticated, service_role;
+
+-- RPC to delete all data for a phone number
+CREATE OR REPLACE FUNCTION public.admin_delete_all_for_phone(p_phone TEXT)
+RETURNS void AS $$
+BEGIN
+  DELETE FROM public.reservations WHERE reserver_phone = p_phone;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.admin_delete_all_for_phone(TEXT) TO authenticated, service_role;
+</file>
+
+<file path="supabase/migrations/20250919140000_user_password_reset.sql">
+-- RPC to reset password for all reservations of a user
+CREATE OR REPLACE FUNCTION public.reset_password(
+  p_phone TEXT,
+  p_new_password TEXT
+)
+RETURNS void AS $$
+BEGIN
+  UPDATE public.reservations
+  SET password_hash = crypt(p_new_password, gen_salt('bf'))
+  WHERE reserver_phone = p_phone;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.reset_password(TEXT, TEXT) TO anon, authenticated, service_role;
+</file>
+
+<file path="supabase/migrations/20250919150000_refactor_user_system.sql">
+-- 1. Drop the old users table if it exists
+DROP TABLE IF EXISTS public.users;
+
+-- 2. Create the new users table
+CREATE TABLE public.users (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    name text NOT NULL,
+    phone text UNIQUE NOT NULL,
+    password_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+COMMENT ON TABLE public.users IS 'Stores user accounts.';
+
+-- 3. Add user_id to reservations table
+ALTER TABLE public.reservations ADD COLUMN user_id UUID;
+
+-- 4. Create users from existing reservations
+INSERT INTO public.users (phone, name, password_hash)
+SELECT
+    reserver_phone,
+    (array_agg(reserver_name ORDER BY created_at DESC))[1] as name,
+    (array_agg(password_hash ORDER BY created_at DESC))[1] as password_hash
+FROM
+    public.reservations
+WHERE
+    reserver_phone IS NOT NULL AND password_hash IS NOT NULL
+GROUP BY
+    reserver_phone
+ON CONFLICT (phone) DO NOTHING;
+
+-- 5. Update reservations with the new user_ids
+UPDATE public.reservations r
+SET user_id = u.id
+FROM public.users u
+WHERE r.reserver_phone = u.phone;
+
+-- 6. Add the foreign key constraint
+ALTER TABLE public.reservations
+ADD CONSTRAINT fk_user
+FOREIGN KEY (user_id)
+REFERENCES public.users(id)
+ON DELETE SET NULL;
+
+-- 7. Add RLS policies for the new users table
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own data"
+ON public.users FOR SELECT
+USING (auth.uid() = id);
+
+-- 8. Create a sign-up function
+CREATE OR REPLACE FUNCTION public.signup(
+  p_name TEXT,
+  p_phone TEXT,
+  p_password TEXT
+) RETURNS public.users AS $$
+DECLARE
+  new_user public.users;
+BEGIN
+  INSERT INTO public.users (name, phone, password_hash)
+  VALUES (p_name, p_phone, crypt(p_password, gen_salt('bf')))
+  RETURNING * INTO new_user;
+  RETURN new_user;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.signup(TEXT, TEXT, TEXT) TO anon, authenticated, service_role;
+
+-- 9. Create a login function
+CREATE OR REPLACE FUNCTION public.login(
+  p_phone TEXT,
+  p_password TEXT
+) RETURNS public.users AS $
+DECLARE
+  found_user public.users;
+BEGIN
+  SELECT * INTO found_user
+  FROM public.users
+  WHERE phone = p_phone AND password_hash = crypt(p_password, password_hash);
+
+  RETURN found_user;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.login(TEXT, TEXT) TO anon, authenticated, service_role;
+
+-- 10. Get reservations for a specific user
+CREATE OR REPLACE FUNCTION public.get_my_reservations_for_user(p_user_id UUID)
+RETURNS SETOF public.reservations AS $
+BEGIN
+  RETURN QUERY
+  SELECT *
+  FROM public.reservations
+  WHERE user_id = p_user_id
+  ORDER BY reservation_date DESC, start_time ASC;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.get_my_reservations_for_user(UUID) TO authenticated, service_role;
+
+-- 11. Cancel a reservation for the logged-in user
+CREATE OR REPLACE FUNCTION public.cancel_reservation_authed(
+  p_reservation_id UUID,
+  p_user_id UUID
+)
+RETURNS void AS $
+DECLARE
+  target_reservation public.reservations;
+BEGIN
+  SELECT * INTO target_reservation FROM public.reservations WHERE id = p_reservation_id;
+
+  IF target_reservation.user_id != p_user_id THEN
+    RAISE EXCEPTION 'Cannot cancel a reservation that does not belong to you.';
+  END IF;
+
+  UPDATE public.reservations
+  SET status = 'cancelled', updated_at = now()
+  WHERE id = p_reservation_id;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.cancel_reservation_authed(UUID, UUID) TO authenticated, service_role;
+</file>
+
+<file path="supabase/migrations/20250919160000_finalize_user_refactor.sql">
+-- Finalize User System Refactor
+
+-- 1. Make old user columns on reservations nullable
+-- These columns are now deprecated and will be populated from the users table.
+ALTER TABLE public.reservations ALTER COLUMN reserver_name DROP NOT NULL;
+ALTER TABLE public.reservations ALTER COLUMN reserver_phone DROP NOT NULL;
+ALTER TABLE public.reservations ALTER COLUMN password_hash DROP NOT NULL;
+
+-- 2. Create a new authenticated reservation function
+-- This function should be called by logged-in users.
+CREATE OR REPLACE FUNCTION public.create_reservation_authed(
+  p_room_id UUID,
+  p_date DATE,
+  p_start TIME,
+  p_end TIME,
+  p_user_id UUID
+) RETURNS TABLE(id UUID) AS $$
+DECLARE
+  v_id UUID;
+  v_user_name TEXT;
+  v_user_phone TEXT;
+BEGIN
+  -- Get user details
+  SELECT name, phone INTO v_user_name, v_user_phone FROM public.users WHERE id = p_user_id;
+  IF v_user_name IS NULL THEN
+    RAISE EXCEPTION 'User not found.';
+  END IF;
+
+  -- Insert the reservation, linking it to the user
+  INSERT INTO public.reservations (
+    room_id, reservation_date, start_time, end_time,
+    user_id, reserver_name, reserver_phone, password_hash
+  ) VALUES (
+    p_room_id, p_date, p_start, p_end,
+    p_user_id, v_user_name, v_user_phone, 'DEPRECATED' -- password_hash is no longer used here
+  ) RETURNING reservations.id INTO v_id;
+
+  RETURN QUERY SELECT v_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.create_reservation_authed(UUID, DATE, TIME, TIME, UUID) TO authenticated, service_role;
+</file>
+
 <file path="tailwind.config.ts">
 import type { Config } from 'tailwindcss';
 
@@ -4176,37 +5398,22 @@ const config = {
 export default config;
 </file>
 
-<file path="tsconfig.json">
-{
-  "compilerOptions": {
-    "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "strictNullChecks": false,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noImplicitAny": false,
-    "jsx": "preserve",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "paths": {
-      "@/*": ["./src/*"]
+<file path="vitest.config.ts">
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.ts',
+    alias: {
+      '@': path.resolve(__dirname, './src'),
     },
-    "types": ["vitest/globals"]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
-}
+});
 </file>
 
 <file path=".cursor/rules/clean-code.mdc">
@@ -6514,456 +7721,470 @@ VALUES
 이 데이터베이스 설계는 TypeScript와 Next.js App Router를 기반으로 한 안정적이고 확장 가능한 회의실 관리 시스템 구현을 위한 완전한 데이터 계층을 제공합니다.
 </file>
 
-<file path="README.md">
-# 회의실 관리 시스템
-
-Next.js 15 + TypeScript + Supabase 기반 회의실 예약 시스템
-
-## 🚀 시작하기
-```bash
-npm run dev
-# http://localhost:3000
-```
-
-## 📁 구조
-```
-src/
-├── app/                    # Next.js App Router
-│   ├── page.tsx           # 홈페이지 (예약 현황)
-│   ├── layout.tsx         # 루트 레이아웃
-│   └── providers.tsx      # React Query Provider
-├── components/ui/          # shadcn-ui 컴포넌트
-├── lib/supabase/          # Supabase 클라이언트
-│   ├── client.ts          # 클라이언트 사이드
-│   └── server.ts          # 서버 사이드
-└── hooks/use-toast.ts     # Toast 훅
-```
-
-## 🗄️ 스키마
-
-### meeting_rooms
-- id (UUID, PK)
-- name (VARCHAR(100), UNIQUE) - 회의실명
-- location (VARCHAR(200)) - 위치  
-- capacity (INTEGER) - 수용인원
-- created_at, updated_at (TIMESTAMP)
-
-### reservations
-- id (UUID, PK)
-- room_id (UUID, FK) - 회의실 ID
-- reservation_date (DATE) - 예약일
-- start_time, end_time (TIME) - 시작/종료 시간
-- reserver_name (VARCHAR(50)) - 예약자명
-- reserver_phone (VARCHAR(20)) - 예약자 전화번호
-- reserver_password (VARCHAR(100)) - 예약 비밀번호
-- password_hash (TEXT) - 해싱된 비밀번호
-- status (VARCHAR(20)) - 'active' | 'cancelled'
-- created_at, updated_at (TIMESTAMP)
-
-## 🔧 핵심 기능
-
-### 데이터베이스 제약조건
-- **시간 중복 방지**: GIST 제약조건으로 동일 회의실, 동일 날짜의 시간 겹침 방지
-- **시간 유효성**: 종료 시간 > 시작 시간 검증
-- **비밀번호 보안**: bcrypt 해싱으로 비밀번호 암호화
-
-### Supabase 설정
-- **RLS 활성화**: Row Level Security로 데이터 접근 제어
-- **정책**: 회의실(읽기), 예약(읽기/생성), 서비스 역할만 수정/삭제
-- **인덱스**: 성능 최적화를 위한 복합 인덱스
-
-## 🛠️ 기술 스택
-- **Frontend**: Next.js 15, React 19, TypeScript
-- **Styling**: Tailwind CSS, shadcn-ui
-- **Backend**: Supabase (PostgreSQL)
-- **Form**: React Hook Form, Zod
-- **State**: React Query, Zustand
-- **Icons**: Lucide React
-- **Utils**: date-fns, es-toolkit, ts-pattern
-
-## 📝 개발 가이드라인
-
-### 핵심 원칙
-- **타입 안전성 우선**: TypeScript + Zod로 런타임/컴파일타임 오류 방지
-- **서버 컴포넌트 우선**: Next.js App Router의 서버 컴포넌트 기본 사용
-- **단순함**: 복잡한 패턴보다 명확한 해결책
-- **실용성**: 이론보다 동작하는 코드 우선
-
-### 파일 구조 규칙
-- **컴포넌트**: PascalCase (ReservationForm.tsx)
-- **서비스**: camelCase (roomService.ts)
-- **타입**: PascalCase (Database.ts)
-- **유틸리티**: camelCase (utils.ts)
-
-### Supabase 클라이언트 사용법
-```typescript
-// 클라이언트 사이드
-import { createClient } from '@/lib/supabase/client';
-const supabase = createClient();
-
-// 서버 사이드
-import { createClient } from '@/lib/supabase/server';
-const supabase = await createClient();
-```
-
-## 🔒 보안 고려사항
-- **비밀번호 해싱**: bcrypt로 예약 비밀번호 암호화
-- **입력 검증**: Zod 스키마로 모든 사용자 입력 검증
-- **RLS 정책**: Supabase Row Level Security로 데이터 접근 제어
-- **HTTPS**: Vercel 기본 제공 HTTPS 사용
-
-## 📋 TODO
-- [ ] 예약 현황 조회 페이지 구현
-- [ ] 예약 생성 폼 구현
-- [ ] 내 예약 조회 기능 구현
-- [ ] 관리자 회의실 관리 페이지 구현
-- [ ] 실시간 업데이트 기능 구현
-- [ ] 모바일 반응형 최적화
-
-## 🚨 중요 사항
-- **RLS 비활성화**: 현재 모든 데이터 접근 가능
-- **비밀번호 보안**: 예약 비밀번호는 bcrypt로 해싱되어 저장
-- **시간 중복 방지**: GIST 제약조건으로 데이터베이스 레벨에서 중복 예약 방지
-- **타입 안전성**: 모든 데이터베이스 작업은 TypeScript 타입으로 보호됨
-</file>
-
-<file path="src/app/page.tsx">
+<file path="src/app/admin/layout.tsx">
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { useToast } from '@/hooks/use-toast';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { generateTimeSlots, isOverlapping } from '@/lib/utils';
-import type { RoomWithReservations } from '@/types';
-import { getRoomsWithReservationsByDate } from '@/lib/services/rooms';
-import { createReservation } from '@/lib/services/reservations';
-import { createClient } from '@/lib/supabase/client';
-import { z } from 'zod';
-import { useForm, Controller } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 
-export default function Home() {
-  const { toast } = useToast();
-  const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [rooms, setRooms] = useState<RoomWithReservations[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+function AdminNavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const pathname = usePathname();
+  const active = pathname === href;
+  return (
+    <Link href={href} className={`pb-2 ${active ? 'font-semibold text-primary border-b-2 border-primary' : 'text-muted-foreground'}`}>
+      {children}
+    </Link>
+  );
+}
 
-  const timeSlots = useMemo(() => generateTimeSlots(9, 18, 30), []);
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
 
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      setLoading(true);
-      try {
-        const data = await getRoomsWithReservationsByDate(date);
-        if (!cancelled) setRooms(data);
-      } catch (e: any) {
-        toast({ title: '불러오기 실패', description: e?.message ?? '데이터 조회 중 오류', variant: 'destructive' });
-      } finally {
-        if (!cancelled) setLoading(false);
+  const logout = async () => {
+    try {
+      const res = await fetch('/api/admin/auth', { method: 'DELETE' });
+      if (res.ok) {
+        router.push('/admin/login');
+      } else {
+        alert('로그아웃에 실패했습니다.');
       }
-    };
-    run();
-    return () => { cancelled = true; };
-  }, [date, toast]);
+    } catch (error) {
+      console.error('Failed to logout', error);
+      alert('로그아웃에 실패했습니다.');
+    }
+  };
 
-  // Realtime subscription to refresh when reservations change
-  useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase
-      .channel('reservations:realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, async (payload) => {
-        // Refresh if the change touches the selected date
-        const d = (payload.new as any)?.reservation_date || (payload.old as any)?.reservation_date;
-        if (!d || d === date) {
-          const data = await getRoomsWithReservationsByDate(date);
-          setRooms(data);
-        }
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [date]);
 
   return (
-    <div className="max-w-5xl mx-auto p-6 space-y-6">
-      <header className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">회의실 예약</h1>
-          <p className="text-sm text-muted-foreground">날짜별 현황 확인 및 예약</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="date">날짜</Label>
-            <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
-          <Button onClick={() => setDate(new Date().toISOString().slice(0, 10))} variant="secondary">오늘</Button>
-        </div>
-      </header>
-
-      <Separator />
-
-      {loading ? (
-        <p className="text-sm text-muted-foreground">불러오는 중...</p>
-      ) : (
-        <div className="grid md:grid-cols-2 gap-4">
-          {rooms.map((room) => (
-            <Card key={room.id} className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold">{room.name}</p>
-                  <p className="text-xs text-muted-foreground">{room.location} · {room.capacity}인</p>
-                </div>
-                <Sheet open={open && selectedRoomId === room.id} onOpenChange={(o) => setOpen(o)}>
-                  <SheetTrigger asChild>
-                    <Button onClick={() => { setSelectedRoomId(room.id); setOpen(true); }}>예약하기</Button>
-                  </SheetTrigger>
-                  <SheetContent side="right" className="bg-white p-6 rounded-l-md shadow-lg w-full sm:max-w-sm">
-                    <BookingForm
-                      date={date}
-                      roomId={room.id}
-                      busy={room.reservations.map(r => ({ start: r.start_time, end: r.end_time }))}
-                      onDone={(ok, msg) => {
-                        setOpen(false);
-                        if (ok) {
-                          toast({ description: '예약이 완료되었습니다.' });
-                          // refresh list
-                          getRoomsWithReservationsByDate(date).then(setRooms);
-                        } else {
-                          toast({ description: msg ?? '예약 실패', variant: 'destructive' });
-                        }
-                      }}
-                    />
-                  </SheetContent>
-                </Sheet>
-              </div>
-
-              <div className="text-xs text-muted-foreground">
-                {room.reservations.length === 0 ? (
-                  <p>예약 없음</p>
-                ) : (
-                  <ul className="flex flex-wrap gap-2">
-                    {room.reservations.map((r) => (
-                      <li key={r.id} className="px-2 py-1 rounded bg-gray-100">
-                        {r.start_time.slice(0,5)}~{r.end_time.slice(0,5)}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
+    <div className="max-w-6xl mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Admin Dashboard</h1>
+        <Button variant="secondary" onClick={logout}>
+          Logout
+        </Button>
+      </div>
+      <nav className="flex gap-6">
+        <AdminNavLink href="/admin">Room Management</AdminNavLink>
+        <AdminNavLink href="/admin/reservers">Reserver Management</AdminNavLink>
+      </nav>
+      <div>{children}</div>
     </div>
   );
 }
+</file>
 
-const bookingSchema = z.object({
-  start: z.string(),
-  end: z.string(),
-  reserver_name: z.string().min(1, '이름을 입력해 주세요'),
-  reserver_phone: z.string().regex(/^010-\d{4}-\d{4}$/i, '전화번호 형식: 010-0000-0000'),
-  reserver_password: z.string().min(4, '비밀번호는 4자 이상'),
-}).refine((data) => data.end > data.start, {
-  message: '종료 시간은 시작 시간보다 늦어야 합니다',
-  path: ['end'],
-});
+<file path="src/app/admin/login/page.tsx">
+'use client';
 
-type BookingFormValues = z.infer<typeof bookingSchema>;
+import { useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 
-function BookingForm({
-  date,
-  roomId,
-  busy,
-  onDone,
-}: {
-  date: string;
-  roomId: string;
-  busy: { start: string; end: string }[];
-  onDone: (ok: boolean, message?: string) => void;
-}) {
-  const timeSlots = useMemo(() => generateTimeSlots(9, 18, 30), []);
-  const {
-    register,
-    handleSubmit,
-    watch,
-    formState: { errors, isSubmitting },
-    setValue,
-    control,
-  } = useForm<BookingFormValues>({
-    resolver: zodResolver(bookingSchema),
-    defaultValues: {
-      start: '09:00:00',
-      end: '09:30:00',
-      reserver_name: '',
-      reserver_phone: '',
-      reserver_password: '',
-    },
-  });
+export default function AdminLoginPage() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const start = watch('start');
-  useEffect(() => {
-    const next = nextSlot(start, timeSlots);
-    if (watch('end') <= start) setValue('end', next);
-  }, [start, timeSlots, watch, setValue]);
-
-  const onSubmit = async (values: BookingFormValues) => {
-    const overlap = busy.some((b) => isOverlapping(values.start, values.end, b.start, b.end));
-    if (overlap) return onDone(false, '해당 시간은 이미 예약되어 있습니다');
-    const result = await createReservation({
-      room_id: roomId,
-      reservation_date: date,
-      start_time: values.start,
-      end_time: values.end,
-      reserver_name: values.reserver_name,
-      reserver_phone: values.reserver_phone,
-      reserver_password: values.reserver_password,
+  const login = async () => {
+    setLoading(true);
+    setError(null);
+    const res = await fetch('/api/admin/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
     });
-    if (!result.success) return onDone(false, result.error);
-    onDone(true);
+    setLoading(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error || '로그인에 실패했어요');
+      return;
+    }
+    window.location.href = '/admin';
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <SheetHeader>
-        <SheetTitle>예약 생성</SheetTitle>
-      </SheetHeader>
-      <div className="grid grid-cols-2 gap-3">
+    <div className="max-w-md mx-auto p-6">
+      <h1 className="text-2xl font-semibold mb-4">관리자 로그인</h1>
+      <Card className="p-4 space-y-3">
         <div className="space-y-1">
-          <Label>시작</Label>
-          <Controller
-            control={control}
-            name="start"
-            render={({ field }) => (
-              <Select onValueChange={field.onChange} value={field.value}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {timeSlots.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
+          <Label htmlFor="username">아이디</Label>
+          <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} />
         </div>
         <div className="space-y-1">
-          <Label>종료</Label>
-          <Controller
-            control={control}
-            name="end"
-            render={({ field }) => (
-              <Select onValueChange={field.onChange} value={field.value}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {timeSlots.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-          {errors.end && <p className="text-xs text-red-600 mt-1">{errors.end.message}</p>}
+          <Label htmlFor="password">비밀번호</Label>
+          <Input id="password" value={password} onChange={(e) => setPassword(e.target.value)} type="password" />
         </div>
-        <div className="space-y-1 col-span-2">
-          <Label>이름</Label>
-          <Input {...register('reserver_name')} />
-          {errors.reserver_name && <p className="text-xs text-red-600 mt-1">{errors.reserver_name.message}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end">
+          <Button onClick={login} disabled={loading}>
+            {loading ? '로그인 중…' : '로그인'}
+          </Button>
         </div>
-        <div className="space-y-1 col-span-2">
-          <Label>전화번호</Label>
-          <Input placeholder="010-0000-0000" {...register('reserver_phone')} />
-          {errors.reserver_phone && <p className="text-xs text-red-600 mt-1">{errors.reserver_phone.message}</p>}
-        </div>
-        <div className="space-y-1 col-span-2">
-          <Label>비밀번호</Label>
-          <Input type="password" {...register('reserver_password')} />
-          {errors.reserver_password && <p className="text-xs text-red-600 mt-1">{errors.reserver_password.message}</p>}
-        </div>
-      </div>
-      <div className="flex justify-end gap-2">
-        <Button type="submit" disabled={isSubmitting}>{isSubmitting ? '예약 중...' : '예약'}</Button>
-      </div>
-    </form>
+      </Card>
+    </div>
   );
-}
-
-function nextSlot(value: string, slots: { value: string }[]) {
-  const idx = slots.findIndex((s) => s.value === value);
-  return slots[Math.min(slots.length - 1, Math.max(0, idx + 1))].value;
 }
 </file>
 
-<file path="src/lib/supabase/server.ts">
-import "server-only";
+<file path="src/app/admin/page.test.tsx">
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import AdminPage from './page';
+import { vi } from 'vitest';
 
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+// Mock global fetch
+global.fetch = vi.fn();
 
-export async function createClient() {
-  const cookieStore = await cookies();
+describe('AdminPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !/^https?:\/\//.test(url)) {
-    throw new Error(
-      "Missing or invalid NEXT_PUBLIC_SUPABASE_URL. Set it to your https://<project>.supabase.co URL in .env.local or your hosting environment."
-    );
-  }
-  if (!anonKey) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_ANON_KEY. Copy the anon key from Supabase project settings into .env.local or your hosting environment."
-    );
-  }
+  it('should display unauthorized message if fetch returns 401', async () => {
+    // Arrange
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: false, 
+      status: 401, 
+      json: () => Promise.resolve({ error: 'Unauthorized' })
+    });
+    render(<AdminPage />);
 
-  return createServerClient(
-    url,
-    anonKey,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
-          } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
-          }
-        },
-      },
+    // Assert
+    await waitFor(() => {
+      expect(screen.getByText('관리자 권한이 필요합니다.')).toBeInTheDocument();
+      expect(screen.getByText('로그인 페이지로 이동')).toHaveAttribute('href', '/admin/login');
+    });
+  });
+
+  it('should display a list of rooms on successful fetch', async () => {
+    // Arrange
+    const mockRooms = [
+      { id: '1', name: 'Room 1', location: '1F', capacity: 10 },
+      { id: '2', name: 'Room 2', location: '2F', capacity: 5 },
+    ];
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: mockRooms })
+    });
+    render(<AdminPage />);
+
+    // Assert
+    await waitFor(() => {
+      expect(screen.getByText('Room 1')).toBeInTheDocument();
+      expect(screen.getByText('1F · 10인')).toBeInTheDocument();
+      expect(screen.getByText('Room 2')).toBeInTheDocument();
+      expect(screen.getByText('2F · 5인')).toBeInTheDocument();
+    });
+  });
+
+  it('should allow creating a new room', async () => {
+    // Arrange
+    // 1. Initial load is empty
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: [] })
+    });
+    // 2. Mock the POST request for creation
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: { id: '3', name: 'New Room', location: '3F', capacity: 8 } })
+    });
+    // 3. Mock the reload after creation
+    const newMockRooms = [{ id: '3', name: 'New Room', location: '3F', capacity: 8 }];
+    (fetch as vi.Mock).mockResolvedValueOnce({ 
+      ok: true, 
+      json: () => Promise.resolve({ data: newMockRooms })
+    });
+
+    render(<AdminPage />);
+
+    // Act
+    fireEvent.change(screen.getByLabelText('이름'), { target: { value: 'New Room' } });
+    fireEvent.change(screen.getByLabelText('위치'), { target: { value: '3F' } });
+    fireEvent.change(screen.getByLabelText('수용 인원'), { target: { value: '8' } });
+    fireEvent.click(screen.getByRole('button', { name: '생성' }));
+
+    // Assert
+    await waitFor(() => {
+      // Check if the POST request was made
+      expect(fetch).toHaveBeenCalledWith('/api/admin/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'New Room', location: '3F', capacity: 8 }),
+      });
+    });
+
+    // Check if the new room is displayed
+    await waitFor(() => {
+      expect(screen.getByText('New Room')).toBeInTheDocument();
+      expect(screen.getByText('3F · 8인')).toBeInTheDocument();
+    });
+  });
+});
+</file>
+
+<file path="src/app/api/admin/rooms/route.ts">
+import 'server-only';
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { createServiceClient } from '@/lib/supabase/service';
+import { requireAdmin } from '@/lib/auth/admin';
+
+const createSchema = z.object({
+  name: z.string().min(1),
+  location: z.string().min(1),
+  capacity: z.number().int().positive(),
+});
+
+const updateSchema = createSchema.extend({ id: z.string().uuid() });
+
+function formatServerError(error: unknown) {
+  if (error instanceof Error) {
+    if (error.message.includes('Supabase URL or key')) {
+      return '서버 설정 오류: Supabase 키가 설정되지 않았습니다.';
     }
+    return error.message;
+  }
+  return '알 수 없는 오류가 발생했습니다.';
+}
+
+function handleServerError(error: unknown, status = 500) {
+  console.error('[api/admin/rooms]', error);
+  const message = formatServerError(error);
+  return NextResponse.json({ error: message }, { status });
+}
+
+export async function GET(req: NextRequest) {
+  const unauth = requireAdmin(req);
+  if (unauth) return unauth;
+
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.from('meeting_rooms').select('*').order('name');
+    if (error) throw new Error(error.message);
+    return NextResponse.json({ data });
+  } catch (error) {
+    return handleServerError(error);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const unauth = requireAdmin(req);
+  if (unauth) return unauth;
+
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ error: '잘못된 JSON 본문입니다.' }, { status: 400 });
+  }
+
+  const parsed = createSchema.safeParse(payload);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from('meeting_rooms')
+      .insert(parsed.data)
+      .select('*')
+      .single();
+    if (error) throw new Error(error.message);
+    return NextResponse.json({ data }, { status: 201 });
+  } catch (error) {
+    return handleServerError(error);
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  const unauth = requireAdmin(req);
+  if (unauth) return unauth;
+
+  let payload: unknown;
+  try {
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ error: '잘못된 JSON 본문입니다.' }, { status: 400 });
+  }
+
+  const parsed = updateSchema.safeParse(payload);
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  const { id, ...updates } = parsed.data;
+
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from('meeting_rooms')
+      .update(updates)
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) throw new Error(error.message);
+    return NextResponse.json({ data });
+  } catch (error) {
+    return handleServerError(error);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  const unauth = requireAdmin(req);
+  if (unauth) return unauth;
+
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get('id');
+  if (!id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  }
+
+  try {
+    const supabase = createServiceClient();
+    const { error } = await supabase.from('meeting_rooms').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return handleServerError(error);
+  }
+}
+</file>
+
+<file path="src/components/nav.tsx">
+'use client';
+
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import type { UserSession } from '@/types';
+import { Button } from './ui/button';
+
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const pathname = usePathname();
+  const active = pathname === href || (href !== '/' && pathname?.startsWith(href));
+  const base = 'hover:underline';
+  const cls = active ? base + ' font-semibold underline' : base + ' text-muted-foreground';
+  return (
+    <Link href={href} className={cls}>
+      {children}
+    </Link>
   );
 }
 
-export async function createPureClient() {
+export default function Nav({ session }: { session: UserSession | null }) {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    const res = await fetch('/api/auth/logout', { method: 'POST' });
+    if (res.ok) {
+      router.push('/login';
+      router.refresh();
+    } else {
+      alert('Logout failed');
+    }
+  };
+
+  return (
+    <nav className="flex items-center justify-between">
+      <div className="flex items-center gap-4 text-sm">
+        <NavLink href="/">예약 하기</NavLink>
+        {session && <NavLink href="/my-reservations">내 예약</NavLink>}
+        <NavLink href="/admin">관리자</NavLink>
+      </div>
+      <div className="flex items-center gap-4 text-sm">
+        {session ? (
+          <>
+            <span className="text-muted-foreground">{session.name}님, 환영합니다.</span>
+            <Button variant="ghost" size="sm" onClick={handleLogout}>
+              로그아웃
+            </Button>
+          </>
+        ) : (
+          <>
+            <NavLink href="/login">로그인</NavLink>
+            <NavLink href="/signup">회원가입</NavLink>
+          </>
+        )}
+      </div>
+    </nav>
+  );
+}
+</file>
+
+<file path="src/lib/auth/admin.ts">
+import { NextRequest, NextResponse } from 'next/server';
+
+export function requireAdmin(req: NextRequest): NextResponse | null {
+  const session = req.cookies.get('admin_session')?.value;
+  const sessionSecret = process.env.ADMIN_SESSION_SECRET || 'admin-secret-key-for-dev';
+  if (!session || session !== sessionSecret) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
+</file>
+
+<file path="src/lib/services/rooms.ts">
+import { createClient } from '@/lib/supabase/client';
+import type { Room, RoomWithReservations, Reservation } from '@/types';
+
+export async function getRooms(): Promise<Room[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('meeting_rooms')
+    .select('*')
+    .order('name');
+  if (error) throw error;
+  return data as Room[];
+}
+
+export async function getReservationsByDate(
+  date: string
+): Promise<Reservation[]> {
+  const supabase = createClient();
+  // Use public view limited to safe columns
+  const { data, error } = await supabase
+    .from('public_reservations')
+    .select('*')
+    .eq('reservation_date', date)
+    .eq('status', 'active');
+  if (error) throw error;
+  return data as unknown as Reservation[];
+}
+
+export async function getRoomsWithReservationsByDate(
+  date: string
+): Promise<RoomWithReservations[]> {
+  const [rooms, reservations] = await Promise.all([
+    getRooms(),
+    getReservationsByDate(date),
+  ]);
+  const byRoom = new Map<string, Reservation[]>();
+  reservations.forEach((r) => {
+    const list = byRoom.get(r.room_id) ?? [];
+    list.push(r);
+    byRoom.set(r.room_id, list);
+  });
+  return rooms.map((room) => ({
+    ...room,
+    reservations: (byRoom.get(room.id) ?? []).sort((a, b) =>
+      a.start_time.localeCompare(b.start_time)
+    ),
+  }));
+}
+</file>
+
+<file path="src/lib/supabase/client.ts">
+import { createBrowserClient } from "@supabase/ssr";
+
+export function createClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
   if (!url || !/^https?:\/\//.test(url)) {
     throw new Error(
       "Missing or invalid NEXT_PUBLIC_SUPABASE_URL. Set it to your https://<project>.supabase.co URL in .env.local or your hosting environment."
@@ -6975,18 +8196,33 @@ export async function createPureClient() {
     );
   }
 
-  return createServerClient(
-    url,
-    anonKey,
-    {
-      cookies: {
-        getAll() {
-          return [];
-        },
-        setAll() {},
-      },
-    }
-  );
+  return createBrowserClient(url, anonKey);
+}
+</file>
+
+<file path="src/lib/supabase/service.ts">
+import 'server-only';
+import { createClient } from '@supabase/supabase-js';
+
+let warnedAboutAnonFallback = false;
+
+export function createServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  const key = serviceKey || anonKey;
+
+  if (!url || !key) {
+    throw new Error('Server misconfigured: missing Supabase URL or key');
+  }
+
+  if (!serviceKey && !warnedAboutAnonFallback) {
+    console.warn('[supabase/service] SUPABASE_SERVICE_ROLE_KEY is not set; falling back to anon key. Configure the service role key for full admin access.');
+    warnedAboutAnonFallback = true;
+  }
+
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 </file>
 
@@ -7023,6 +8259,105 @@ export function isOverlapping(
   bEnd: string
 ) {
   return aStart < bEnd && bStart < aEnd;
+}
+</file>
+
+<file path="src/middleware.ts">
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  if (pathname.startsWith('/admin') && !pathname.startsWith('/admin/login')) {
+    const session = req.cookies.get('admin_session')?.value;
+    if (!session) {
+      const url = req.nextUrl.clone();
+      url.pathname = '/admin/login';
+      url.searchParams.set('next', pathname);
+      return NextResponse.redirect(url);
+    }
+  }
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/admin/:path*'],
+};
+</file>
+
+<file path="src/types/index.ts">
+import type { Database } from './database';
+
+export type Room = Database['public']['Tables']['meeting_rooms']['Row'];
+export type Reservation = Database['public']['Tables']['reservations']['Row'];
+
+export interface CreateRoomData {
+  name: string;
+  location: string;
+  capacity: number;
+}
+
+export interface CreateReservationData {
+  room_id: string;
+  reservation_date: string; // YYYY-MM-DD
+  start_time: string; // HH:MM:SS
+  end_time: string; // HH:MM:SS
+  reserver_name: string;
+  reserver_phone: string;
+  reserver_password: string;
+}
+
+export interface ServiceResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+export interface TimeSlot {
+  start: string; // HH:MM
+  end: string; // HH:MM
+}
+
+export interface RoomWithReservations extends Room {
+  reservations: Reservation[];
+}
+
+export type UserSession = {
+  userId: string;
+  name: string;
+};
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "strictNullChecks": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noImplicitAny": false,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "types": ["vitest/globals"]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
 }
 </file>
 
@@ -8075,6 +9410,373 @@ if (duration > 1000) {
 ??湲곗닠 臾몄꽌??TypeScript? App Router瑜?湲곕컲?쇰줈 ???덉젙?곸씠怨??뺤옣 媛?ν븳 ?뚯쓽??愿由??쒖뒪??援ы쁽???꾪븳 湲곗닠??媛?대뱶?쇱씤???쒓났?⑸땲??
 </file>
 
+<file path="README.md">
+# 회의실 관리 시스템
+Next.js 15 + TypeScript + Supabase 기반 회의실 예약/관리 서비스
+
+## 로컬 실행
+```bash
+npm run dev
+# http://localhost:3000
+```
+
+## 구조
+```
+src/
+  app/                    # Next.js App Router
+    page.tsx             # 메인(예약 현황 + 예약)
+    layout.tsx           # 루트 레이아웃
+    providers.tsx        # React Query Provider
+    admin/               # 관리자 페이지
+      login/             # 관리자 로그인
+    my-reservations/     # 내 예약 조회/취소
+  components/ui/         # shadcn-ui 구성요소
+  lib/supabase/          # Supabase 클라이언트(서버/클라이언트)
+  lib/services/          # 비즈니스 로직(Service 계층)
+  types/                 # 타입 정의
+```
+
+## 현재 개발 현황(핵심)
+- 사용자: 날짜별 예약 현황 조회, 예약 생성, 내 예약 조회/취소, 실시간 갱신.
+- 관리자: 회의실 목록/생성/수정/삭제(CRUD) 구현 및 실시간 반영.
+- 인증: 관리자 아이디/비밀번호 로그인(`/admin/login`), 세션 쿠키(`admin_session`).
+- 기본 계정: 아이디 `joonake`, 비밀번호 `1234` (환경변수 `ADMIN_USERNAME`, `ADMIN_PASSWORD`로 변경 가능).
+- 백엔드: Supabase(PostgreSQL), 중복 예약 방지 제약조건(GIST), RPC 기반 처리.
+- 프런트: Next.js(App Router), shadcn-ui, React Hook Form + Zod 검증 적용.
+
+## 환경 변수
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ADMIN_USERNAME`, `ADMIN_PASSWORD`
+
+## 향후 개발 중요 원칙(1줄 요약)
+타입과 스키마로 계약을 고정(Zod/TS)하고 서비스 계층 재사용으로 단일 책임을 지키며(중복 최소화), 필수 경로에 테스트를 붙여 회귀 오류를 방지한다.
+</file>
+
+<file path="src/app/api/admin/auth/route.ts">
+import 'server-only';
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(req: NextRequest) {
+  const { username, password } = await req
+    .json()
+    .catch(() => ({ username: undefined, password: undefined }));
+
+  const expectedUser = process.env.ADMIN_USERNAME || 'joonake';
+  const expectedPass = process.env.ADMIN_PASSWORD || '1234';
+
+  if (!username || !password || username !== expectedUser || password !== expectedPass) {
+    return NextResponse.json({ error: '아이디 또는 비밀번호가 올바르지 않습니다' }, { status: 401 });
+  }
+
+  const sessionSecret = process.env.ADMIN_SESSION_SECRET || 'admin-secret-key-for-dev';
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set('admin_session', sessionSecret, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: false, // process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 60 * 60 * 8, // 8 hours
+  });
+  return res;
+}
+
+export async function DELETE() {
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set('admin_session', '', { httpOnly: true, maxAge: 0, path: '/' });
+  return res;
+}
+</file>
+
+<file path="src/app/api/my-reservations/route.ts">
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { cookies } from 'next/headers';
+
+export async function GET(req: Request) {
+  try {
+    const cookieStore = cookies();
+    const sessionCookie = cookieStore.get('user_session');
+
+    if (!sessionCookie) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const session = JSON.parse(sessionCookie.value);
+    const userId = session?.userId;
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    }
+
+    const supabase = createServiceClient();
+
+    const { data: reservations, error } = await supabase.rpc('get_my_reservations_for_user', {
+      p_user_id: userId,
+    });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    const list = (reservations ?? []) as any[];
+    const roomIds = Array.from(new Set(list.map((r) => r.room_id).filter(Boolean)));
+    const rooms: Record<string, { name: string; location: string; capacity?: number }> = {};
+    if (roomIds.length) {
+      const { data: roomsData } = await supabase
+        .from('meeting_rooms')
+        .select('id,name,location,capacity')
+        .in('id', roomIds);
+      (roomsData ?? []).forEach((r: any) => {
+        rooms[r.id] = { name: r.name, location: r.location, capacity: r.capacity };
+      });
+    }
+
+    const merged = list.map((r) => ({
+      ...r,
+      room: rooms[r.room_id] ?? null,
+    }));
+
+    return NextResponse.json({ data: merged });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'unexpected error' }, { status: 500 });
+  }
+}
+</file>
+
+<file path="src/app/layout.tsx">
+import type { Metadata } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import './globals.css';
+import Providers from './providers';
+import Link from 'next/link';
+import { cookies } from 'next/headers';
+import type { UserSession } from '@/types';
+
+// ... (imports)
+
+// ... (metadata)
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  const cookieStore = cookies();
+  const sessionCookie = cookieStore.get('user_session');
+  let session: UserSession | null = null;
+  if (sessionCookie) {
+    try {
+      session = JSON.parse(sessionCookie.value);
+    } catch {}
+  }
+
+  return (
+    <html lang="en">
+      <body className={inter.className}>
+        <Providers>
+          <main className="p-6">
+            <Nav session={session} />
+            <div className="mt-6">{children}</div>
+          </main>
+          <Toaster />
+        </Providers>
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="src/app/my-reservations/page.test.tsx">
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import MyReservationsClientPage from './client-page'; // Changed import
+import * as reservationService from '@/lib/services/reservations';
+import { vi } from 'vitest';
+import type { UserSession } from '@/types';
+
+// Mocks
+vi.mock('@/lib/services/reservations');
+const mockedGetMyReservations = vi.mocked(reservationService.getMyReservations);
+const mockedCancelReservation = vi.mocked(reservationService.cancelReservation);
+
+const mockToast = vi.fn();
+vi.mock('@/hooks/use-toast', () => ({
+  useToast: () => ({ toast: mockToast }),
+}));
+
+// Mock session data
+const mockSession: UserSession = {
+  userId: 'user-123',
+  name: '홍길동',
+};
+
+describe('MyReservationsClientPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should display reservations for the logged-in user', async () => {
+    const mockReservations = [
+      {
+        id: '1',
+        room_id: 'room-1',
+        reservation_date: '2025-09-20',
+        start_time: '10:00:00',
+        end_time: '11:00:00',
+        status: 'active',
+        room: { name: '대회의실', location: '본관 3층' },
+      },
+      {
+        id: '2',
+        room_id: 'room-2',
+        reservation_date: '2025-09-21',
+        start_time: '14:00:00',
+        end_time: '15:00:00',
+        status: 'cancelled',
+        room: { name: '소회의실', location: '본관 2층' },
+      },
+    ];
+    mockedGetMyReservations.mockResolvedValue({ success: true, data: mockReservations });
+
+    render(<MyReservationsClientPage session={mockSession} />);
+
+    // The component now fetches data on mount, so we just wait for the result
+    await waitFor(() => {
+      expect(screen.getByText('2025-09-20 · 10:00–11:00')).toBeInTheDocument();
+      expect(screen.getByText('2025-09-21 · 14:00–15:00')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/대회의실/)).toBeInTheDocument();
+    expect(screen.getByText(/소회의실/)).toBeInTheDocument();
+    expect(mockedGetMyReservations).toHaveBeenCalledTimes(1);
+  });
+
+  it('should show empty state when no reservations are found', async () => {
+    mockedGetMyReservations.mockResolvedValue({ success: true, data: [] });
+
+    render(<MyReservationsClientPage session={mockSession} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('예약 내역이 없습니다.')).toBeInTheDocument();
+    });
+  });
+
+  it('should call cancelReservation when the cancel button is clicked', async () => {
+    const mockReservations = [
+      {
+        id: 'res-1',
+        room_id: 'room-1',
+        reservation_date: '2025-09-20',
+        start_time: '10:00:00',
+        end_time: '11:00:00',
+        status: 'active',
+        room: { name: '대회의실', location: '본관 3층' },
+      },
+    ];
+    // Mock the initial fetch and the fetch after cancellation
+    mockedGetMyReservations
+      .mockResolvedValueOnce({ success: true, data: mockReservations })
+      .mockResolvedValueOnce({ success: true, data: [] });
+      
+    mockedCancelReservation.mockResolvedValue({ success: true });
+
+    // Mock window.confirm
+    window.confirm = vi.fn(() => true);
+
+    render(<MyReservationsClientPage session={mockSession} />);
+
+    const cancelButton = await screen.findByRole('button', { name: '취소' });
+    fireEvent.click(cancelButton);
+
+    await waitFor(() => {
+      expect(mockedCancelReservation).toHaveBeenCalledWith('res-1');
+    });
+    
+    expect(mockToast).toHaveBeenCalledWith({ description: '예약이 취소되었습니다.' });
+    
+    // Check if the list is updated
+    await waitFor(() => {
+        expect(screen.getByText('예약 내역이 없습니다.')).toBeInTheDocument();
+    });
+  });
+});
+</file>
+
+<file path="src/lib/supabase/server.ts">
+import "server-only";
+
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+
+export async function createClient() {
+  const cookieStore = await cookies();
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !/^https?:\/\//.test(url)) {
+    throw new Error(
+      "Missing or invalid NEXT_PUBLIC_SUPABASE_URL. Set it to your https://<project>.supabase.co URL in .env.local or your hosting environment."
+    );
+  }
+  if (!anonKey) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_ANON_KEY. Copy the anon key from Supabase project settings into .env.local or your hosting environment."
+    );
+  }
+
+  return createServerClient(
+    url,
+    anonKey,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
+        },
+      },
+    }
+  );
+}
+
+export async function createPureClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !/^https?:\/\//.test(url)) {
+    throw new Error(
+      "Missing or invalid NEXT_PUBLIC_SUPABASE_URL. Set it to your https://<project>.supabase.co URL in .env.local or your hosting environment."
+    );
+  }
+  if (!anonKey) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_ANON_KEY. Copy the anon key from Supabase project settings into .env.local or your hosting environment."
+    );
+  }
+
+  return createServerClient(
+    url,
+    anonKey,
+    {
+      cookies: {
+        getAll() {
+          return [];
+        },
+        setAll() {},
+      },
+    }
+  );
+}
+</file>
+
 <file path="package.json">
 {
   "name": "dbtest2",
@@ -8142,6 +9844,341 @@ if (duration > 1000) {
     "typescript": "^5",
     "vitest": "^3.2.4"
   }
+}
+</file>
+
+<file path="src/lib/services/reservations.ts">
+import type { CreateReservationData, ServiceResult, Reservation } from '@/types';
+
+export async function createReservation(
+  data: Omit<CreateReservationData, 'reserver_name' | 'reserver_phone' | 'reserver_password'>
+): Promise<ServiceResult<string>> {
+  const res = await fetch('/api/reservations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Failed to create reservation' }));
+    return { success: false, error: body.error };
+  }
+  const body = await res.json();
+  return { success: true, data: body.data?.id ?? '' };
+}
+
+
+export async function cancelReservation(id: string): Promise<ServiceResult<void>> {
+  const res = await fetch(`/api/reservations/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Failed to cancel reservation' }));
+    return { success: false, error: body.error };
+  }
+  return { success: true };
+}
+
+export async function getMyReservations(): Promise<ServiceResult<Reservation[]>> {
+  const res = await fetch('/api/my-reservations');
+  const body = await res.json();
+  if (!res.ok) {
+    return { success: false, error: body.error };
+  }
+  return { success: true, data: body.data };
+}
+</file>
+
+<file path="src/app/admin/page.tsx">
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import { createClient } from '@/lib/supabase/client';
+
+interface RoomForm {
+  id?: string;
+  name: string;
+  location: string;
+  capacity: number;
+}
+
+async function readJson<T = any>(res: Response): Promise<T | null> {
+  const text = await res.text();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('Invalid JSON response');
+  }
+}
+
+export default function AdminPage() {
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [unauthorized, setUnauthorized] = useState(false);
+  const [form, setForm] = useState<RoomForm>({ name: '', location: '', capacity: 4 });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/rooms', { cache: 'no-store' });
+      const json = await readJson<{ data?: any[]; error?: any }>(res);
+      if (res.status === 401) {
+        setUnauthorized(true);
+        return;
+      }
+      if (!res.ok) {
+        alert((json as any)?.error || '회의실 목록을 불러오지 못했습니다.');
+        return;
+      }
+      setUnauthorized(false);
+      setRooms(Array.isArray(json?.data) ? json?.data : []);
+    } catch (error) {
+      console.error('Failed to load rooms', error);
+      alert('회의실 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('meeting_rooms:realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_rooms' }, () => {
+        load();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [load]);
+
+  const submit = async () => {
+    try {
+      const method = form.id ? 'PUT' : 'POST';
+      const res = await fetch('/api/admin/rooms', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const json = await readJson<{ data?: any; error?: any }>(res);
+      if (!res.ok) {
+        alert((json as any)?.error || '회의실 정보를 저장하지 못했습니다.');
+        return;
+      }
+      const payload = json?.data;
+      if (payload) {
+        setRooms((prev) => {
+          if (form.id) {
+            return prev.map((room) => (room.id === payload.id ? payload : room));
+          }
+          return [...prev, payload];
+        });
+      }
+      setForm({ name: '', location: '', capacity: 4 });
+      await load();
+    } catch (error) {
+      console.error('Failed to submit room form', error);
+      alert('회의실 정보를 저장하지 못했습니다. 잠시 후 다시 시도하세요.');
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm('삭제하시겠습니까? 관련 예약도 함께 삭제됩니다.')) return;
+    try {
+      const res = await fetch(`/api/admin/rooms?id=${id}`, { method: 'DELETE' });
+      const json = await readJson<{ error?: any }>(res);
+      if (!res.ok) {
+        alert((json as any)?.error || '회의실 삭제에 실패했습니다.');
+        return;
+      }
+      setRooms((prev) => prev.filter((room) => room.id !== id));
+      await load();
+    } catch (error) {
+      console.error('Failed to delete room', error);
+      alert('회의실 삭제에 실패했습니다. 잠시 후 다시 시도하세요.');
+    }
+  };
+
+  const logout = async () => {
+    try {
+      const res = await fetch('/api/admin/auth', { method: 'DELETE' });
+      if (res.ok) {
+        setUnauthorized(true);
+      }
+    } catch (error) {
+      console.error('Failed to logout', error);
+      alert('로그아웃에 실패했습니다.');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-semibold">Room Management</h2>
+        {!unauthorized && (
+          <Button variant="secondary" onClick={logout}>
+            Logout
+          </Button>
+        )}
+      </div>
+      {unauthorized && (
+        <Card className="p-4 text-sm">
+          관리자 권한이 필요합니다.{' '}
+          <a className="underline" href="/admin/login">
+            로그인 페이지로 이동
+          </a>
+        </Card>
+      )}
+
+      {!unauthorized && (
+        <>
+          <Card className="p-4 space-y-3">
+            <h2 className="font-medium">회의실 생성/수정</h2>
+            <div className="grid md:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="room-name">이름</Label>
+                <Input
+                  id="room-name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="room-location">위치</Label>
+                <Input
+                  id="room-location"
+                  value={form.location}
+                  onChange={(e) => setForm({ ...form, location: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="room-capacity">수용 인원</Label>
+                <Input
+                  id="room-capacity"
+                  type="number"
+                  value={form.capacity}
+                  onChange={(e) =>
+                    setForm({ ...form, capacity: Number(e.target.value || 0) })
+                  }
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={submit} data-testid="submit-button">
+                {form.id ? '수정' : '생성'}
+              </Button>
+              {form.id && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setForm({ name: '', location: '', capacity: 4 })}
+                >
+                  취소
+                </Button>
+              )}
+            </div>
+          </Card>
+
+          <Card className="p-4 space-y-3">
+            <h2 className="font-medium">회의실 목록</h2>
+            {loading ? (
+              <p className="text-sm text-muted-foreground">불러오는 중...</p>
+            ) : unauthorized ? (
+              <p className="text-sm text-muted-foreground">권한이 없습니다.</p>
+            ) : (
+              <ul className="divide-y">
+                {rooms.map((r: any) => (
+                  <li key={r.id} className="flex items-center justify-between py-2">
+                    <div className="text-sm">
+                      <div className="font-medium">{r.name}</div>
+                      <div className="text-muted-foreground">
+                        {r.location} · {r.capacity}명
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          setForm({
+                            id: r.id,
+                            name: r.name,
+                            location: r.location,
+                            capacity: r.capacity,
+                          })
+                        }
+                      >
+                        수정
+                      </Button>
+                      <Button variant="destructive" onClick={() => remove(r.id)}>
+                        삭제
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+                {rooms.length === 0 && (
+                  <li className="py-4 text-sm text-muted-foreground">
+                    등록된 회의실이 없습니다.
+                  </li>
+                )}
+              </ul>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="src/app/my-reservations/page.tsx">
+import { cookies } from 'next/headers';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import MyReservationsClientPage from './client-page';
+
+type UserSession = {
+  userId: string;
+  name: string;
+};
+
+export default function MyReservationsPage() {
+  const cookieStore = cookies();
+  const sessionCookie = cookieStore.get('user_session');
+  let session: UserSession | null = null;
+
+  if (sessionCookie) {
+    try {
+      session = JSON.parse(sessionCookie.value);
+    } catch {
+      // Invalid cookie, treat as not logged in
+    }
+  }
+
+  if (!session?.userId) {
+    return (
+      <div className="max-w-md mx-auto p-6 text-center">
+        <h1 className="text-2xl font-semibold mb-4">로그인 필요</h1>
+        <p className="text-muted-foreground mb-6">
+          예약 내역을 보려면 로그인이 필요합니다.
+        </p>
+        <Link href="/login">
+          <Button>로그인 페이지로 이동</Button>
+        </Link>
+      </div>
+    );
+  }
+
+  return <MyReservationsClientPage session={session} />;
 }
 </file>
 
