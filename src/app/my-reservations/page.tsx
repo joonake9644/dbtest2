@@ -46,7 +46,7 @@ export default function MyReservationsPage() {
 
     setLoading(true);
     try {
-      const result = await getMyReservations(trimmedPhone, trimmedPassword);
+      const result = await getMyReservations(trimmedPhone, trimmedPassword, from, to);
       if (!result.success) {
         throw new Error(result.error ?? '예약 조회 중 오류가 발생했습니다.');
       }

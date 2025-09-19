@@ -61,12 +61,16 @@ export async function cancelReservation(
 
 export async function getMyReservations(
   phone: string,
-  password: string
+  password: string,
+  from?: string,
+  to?: string
 ): Promise<ServiceResult<Reservation[]>> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc('get_my_reservations', {
     p_phone: phone,
     p_password: password,
+    p_from_date: from || null,
+    p_to_date: to || null,
   });
   if (error) return { success: false, error: error.message };
   return { success: true, data: (data ?? []) as Reservation[] };
