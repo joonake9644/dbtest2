@@ -10,7 +10,7 @@ BEGIN
   SELECT r.*
   FROM public.reservations r
   WHERE r.reserver_phone = p_phone
-    AND r.password_hash = crypt(p_password, r.password_hash)
+    AND r.password_hash = extensions.crypt(p_password, r.password_hash)
     AND (p_from_date IS NULL OR r.reservation_date >= p_from_date)
     AND (p_to_date IS NULL OR r.reservation_date <= p_to_date)
   ORDER BY r.reservation_date DESC, r.start_time ASC;

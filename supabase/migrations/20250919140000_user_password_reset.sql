@@ -6,9 +6,12 @@ CREATE OR REPLACE FUNCTION public.reset_password(
 RETURNS void AS $$
 BEGIN
   UPDATE public.reservations
-  SET password_hash = crypt(p_new_password, gen_salt('bf'))
+  SET password_hash = extensions.crypt(p_new_password, extensions.gen_salt('bf'))
   WHERE reserver_phone = p_phone;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION public.reset_password(TEXT, TEXT) TO anon, authenticated, service_role;
+
+
+

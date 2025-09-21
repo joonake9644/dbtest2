@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Table,
   TableBody,
@@ -31,7 +31,7 @@ export default function AdminReserversPage() {
   const [details, setDetails] = useState<ReservationDetail[]>([]);
   const [detailsLoading, setDetailsLoading] = useState(false);
 
-  const fetchReservers = async () => {
+  const fetchReservers = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch('/api/admin/reservers');
@@ -50,11 +50,11 @@ export default function AdminReserversPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
-    fetchReservers();
-  }, []);
+    void fetchReservers();
+  }, [fetchReservers]);
 
   const handleViewDetails = async (reserver: Reserver) => {
     if (selectedReserver?.reserver_phone === reserver.reserver_phone) {
@@ -101,7 +101,7 @@ export default function AdminReserversPage() {
         title: 'Success',
         description: 'All reservations for this user have been deleted.',
       });
-      fetchReservers(); // Refresh the list
+      await fetchReservers();
       setSelectedReserver(null);
       setDetails([]);
     } catch (error: any) {
@@ -157,7 +157,11 @@ export default function AdminReserversPage() {
                   </h2>
                   <Button
                     variant="destructive"
-                    onClick={() => handleDelete(selectedReserver.reserver_phone, selectedReserver.reserver_name, selectedReserver.reservation_count)}
+                    onClick={() => handleDelete(
+                      selectedReserver.reserver_phone,
+                      selectedReserver.reserver_name,
+                      selectedReserver.reservation_count,
+                    )}
                   >
                     Delete All
                   </Button>
@@ -178,7 +182,9 @@ export default function AdminReserversPage() {
                       {details.map((res) => (
                         <TableRow key={res.id}>
                           <TableCell>{res.reservation_date}</TableCell>
-                          <TableCell>{res.start_time.slice(0,5)} - {res.end_time.slice(0,5)}</TableCell>
+                          <TableCell>
+                            {res.start_time.slice(0, 5)} - {res.end_time.slice(0, 5)}
+                          </TableCell>
                           <TableCell>{res.room_id}</TableCell>
                           <TableCell>{res.status}</TableCell>
                         </TableRow>
@@ -194,3 +200,4 @@ export default function AdminReserversPage() {
     </div>
   );
 }
+

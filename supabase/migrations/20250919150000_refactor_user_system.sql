@@ -58,7 +58,7 @@ DECLARE
   new_user public.users;
 BEGIN
   INSERT INTO public.users (name, phone, password_hash)
-  VALUES (p_name, p_phone, crypt(p_password, gen_salt('bf')))
+  VALUES (p_name, p_phone, extensions.crypt(p_password, extensions.gen_salt('bf')))
   RETURNING * INTO new_user;
   RETURN new_user;
 END;
@@ -70,23 +70,23 @@ GRANT EXECUTE ON FUNCTION public.signup(TEXT, TEXT, TEXT) TO anon, authenticated
 CREATE OR REPLACE FUNCTION public.login(
   p_phone TEXT,
   p_password TEXT
-) RETURNS public.users AS $
+) RETURNS public.users AS $$
 DECLARE
   found_user public.users;
 BEGIN
   SELECT * INTO found_user
   FROM public.users
-  WHERE phone = p_phone AND password_hash = crypt(p_password, password_hash);
+  WHERE phone = p_phone AND password_hash = extensions.crypt(p_password, password_hash);
 
   RETURN found_user;
 END;
-$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION public.login(TEXT, TEXT) TO anon, authenticated, service_role;
 
 -- 10. Get reservations for a specific user
 CREATE OR REPLACE FUNCTION public.get_my_reservations_for_user(p_user_id UUID)
-RETURNS SETOF public.reservations AS $
+RETURNS SETOF public.reservations AS $$
 BEGIN
   RETURN QUERY
   SELECT *
@@ -94,7 +94,7 @@ BEGIN
   WHERE user_id = p_user_id
   ORDER BY reservation_date DESC, start_time ASC;
 END;
-$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION public.get_my_reservations_for_user(UUID) TO authenticated, service_role;
 
@@ -103,7 +103,7 @@ CREATE OR REPLACE FUNCTION public.cancel_reservation_authed(
   p_reservation_id UUID,
   p_user_id UUID
 )
-RETURNS void AS $
+RETURNS void AS $$
 DECLARE
   target_reservation public.reservations;
 BEGIN
@@ -117,6 +117,10 @@ BEGIN
   SET status = 'cancelled', updated_at = now()
   WHERE id = p_reservation_id;
 END;
-$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION public.cancel_reservation_authed(UUID, UUID) TO authenticated, service_role;
+
+
+
+

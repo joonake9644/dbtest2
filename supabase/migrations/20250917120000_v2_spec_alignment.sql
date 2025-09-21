@@ -51,16 +51,23 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- No overlapping active reservations per room/date
 DO $$ BEGIN
-  ALTER TABLE public.reservations
-  ADD CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
-    room_id WITH =,
-    reservation_date WITH =,
-    tsrange(
-      (reservation_date::timestamp + start_time),
-      (reservation_date::timestamp + end_time)
-    ) WITH &&
-  ) WHERE (status = 'active');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'no_overlapping_reservations'
+      AND conrelid = 'public.reservations'::regclass
+  ) THEN
+    ALTER TABLE public.reservations
+    ADD CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
+      room_id WITH =,
+      reservation_date WITH =,
+      tsrange(
+        (reservation_date::timestamp + start_time),
+        (reservation_date::timestamp + end_time)
+      ) WITH &&
+    ) WHERE (status = 'active');
+  END IF;
+END $$;
 
 -- Public view without sensitive fields
 CREATE OR REPLACE VIEW public.public_reservations AS
@@ -68,6 +75,7 @@ SELECT id, room_id, reservation_date, start_time, end_time, status, created_at, 
 FROM public.reservations;
 
 -- RPC: create_reservation
+DROP FUNCTION IF EXISTS public.create_reservation(UUID, DATE, TIME, TIME, TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.create_reservation(
   p_room_id UUID,
   p_date DATE,
@@ -83,12 +91,13 @@ DECLARE v_id UUID; BEGIN
     reserver_name, reserver_phone, password_hash
   ) VALUES (
     p_room_id, p_date, p_start, p_end,
-    p_name, p_phone, crypt(p_password, gen_salt('bf'))
+    p_name, p_phone, extensions.crypt(p_password, extensions.gen_salt('bf'))
   ) RETURNING reservations.id INTO v_id;
   RETURN QUERY SELECT v_id;
 END; $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- RPC: cancel_reservation
+DROP FUNCTION IF EXISTS public.cancel_reservation(UUID, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.cancel_reservation(
   p_id UUID,
   p_phone TEXT,
@@ -100,13 +109,14 @@ BEGIN
   WHERE r.id = p_id
     AND r.reserver_phone = p_phone
     AND r.status = 'active'
-    AND r.password_hash = crypt(p_password, r.password_hash);
+    AND r.password_hash = extensions.crypt(p_password, r.password_hash);
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Cancel failed: not found or invalid credentials' USING ERRCODE = 'P0001';
   END IF;
 END; $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- RPC: get_my_reservations
+DROP FUNCTION IF EXISTS public.get_my_reservations(TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.get_my_reservations(
   p_phone TEXT,
   p_password TEXT
@@ -116,7 +126,15 @@ BEGIN
   SELECT r.*
   FROM public.reservations r
   WHERE r.reserver_phone = p_phone
-    AND r.password_hash = crypt(p_password, r.password_hash)
+    AND r.password_hash = extensions.crypt(p_password, r.password_hash)
   ORDER BY r.reservation_date DESC, r.start_time ASC;
 END; $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+
+
+
+
+
+
 

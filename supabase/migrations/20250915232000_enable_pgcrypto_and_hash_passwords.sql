@@ -15,7 +15,7 @@ END $$;
 
 -- 3) Backfill from reserver_password if present
 UPDATE reservations
-SET password_hash = crypt(reserver_password, gen_salt('bf'))
+SET password_hash = extensions.crypt(reserver_password, extensions.gen_salt('bf'))
 WHERE password_hash IS NULL AND reserver_password IS NOT NULL;
 
 -- 4) Replace create_reservation to store hashed password
@@ -40,7 +40,7 @@ BEGIN
     reserver_name, reserver_phone, password_hash, status
   ) VALUES (
     p_room_id, p_date, p_start, p_end,
-    p_name, p_phone, crypt(p_password, gen_salt('bf')), 'active'
+    p_name, p_phone, extensions.crypt(p_password, extensions.gen_salt('bf')), 'active'
   ) RETURNING * INTO r;
 
   RETURN r;
@@ -61,7 +61,7 @@ BEGIN
   SET status = 'cancelled'
   WHERE id = p_id
     AND reserver_phone = p_phone
-    AND password_hash = crypt(p_password, password_hash)
+    AND password_hash = extensions.crypt(p_password, password_hash)
     AND status = 'active';
 
   IF NOT FOUND THEN
@@ -92,7 +92,7 @@ CREATE OR REPLACE FUNCTION public.get_my_reservations(
          r.reserver_name, r.status, r.created_at, r.updated_at
   FROM reservations r
   WHERE r.reserver_phone = p_phone
-    AND r.password_hash = crypt(p_password, r.password_hash)
+    AND r.password_hash = extensions.crypt(p_password, r.password_hash)
   ORDER BY r.reservation_date DESC, r.start_time DESC;
 $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 
@@ -101,4 +101,7 @@ GRANT EXECUTE ON FUNCTION public.get_my_reservations(TEXT, TEXT)
 
 -- 7) Optionally drop plain password column (safe once all code uses hash)
 -- ALTER TABLE reservations DROP COLUMN IF EXISTS reserver_password;
+
+
+
 

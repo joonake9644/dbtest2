@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -8,10 +8,13 @@ import { Button } from './ui/button';
 function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
   const pathname = usePathname();
   const active = pathname === href || (href !== '/' && pathname?.startsWith(href));
-  const base = 'hover:underline';
-  const cls = active ? base + ' font-semibold underline' : base + ' text-muted-foreground';
+  const base = 'hover:underline transition-colors';
+  const className = active
+    ? `${base} font-semibold underline`
+    : `${base} text-muted-foreground`;
+
   return (
-    <Link href={href} className={cls}>
+    <Link href={href} className={className}>
       {children}
     </Link>
   );
@@ -21,11 +24,15 @@ export default function Nav({ session }: { session: UserSession | null }) {
   const router = useRouter();
 
   const handleLogout = async () => {
-    const res = await fetch('/api/auth/logout', { method: 'POST' });
-    if (res.ok) {
-      router.push('/login';
+    try {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('Logout failed');
+      }
+      router.push('/login');
       router.refresh();
-    } else {
+    } catch (error) {
+      console.error(error);
       alert('Logout failed');
     }
   };

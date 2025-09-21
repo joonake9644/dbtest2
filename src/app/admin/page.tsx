@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,16 +14,66 @@ interface RoomForm {
   capacity: number;
 }
 
-async function readJson<T = any>(res: Response): Promise<T | null> {
-  const text = await res.text();
-  if (!text) {
-    return null;
+type JsonCapableResponse = Response & {
+  json?: () => Promise<any>;
+  text?: () => Promise<string>;
+  clone?: () => Response;
+};
+
+type SupabaseClient = ReturnType<typeof createClient>;
+type RealtimeChannel = ReturnType<SupabaseClient['channel']>;
+
+function safeAlert(message: string) {
+  if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(message);
+  } else {
+    console.error(message);
   }
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error('Invalid JSON response');
+}
+
+function safeConfirm(message: string) {
+  if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+    return window.confirm(message);
   }
+  console.warn(message);
+  return true;
+}
+
+async function readJson<T = unknown>(res: JsonCapableResponse): Promise<T | null> {
+  const cloned = typeof res.clone === 'function' ? res.clone() : null;
+
+  if (typeof res.json === 'function') {
+    try {
+      return (await res.json()) as T;
+    } catch {
+      if (cloned && typeof cloned.text === 'function') {
+        const fallback = await cloned.text();
+        if (!fallback) {
+          return null;
+        }
+        try {
+          return JSON.parse(fallback) as T;
+        } catch {
+          throw new Error('Invalid JSON response');
+        }
+      }
+      return null;
+    }
+  }
+
+  if (typeof res.text === 'function') {
+    const text = await res.text();
+    if (!text) {
+      return null;
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new Error('Invalid JSON response');
+    }
+  }
+
+  return null;
 }
 
 export default function AdminPage() {
@@ -36,40 +86,54 @@ export default function AdminPage() {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/rooms', { cache: 'no-store' });
-      const json = await readJson<{ data?: any[]; error?: any }>(res);
+      const json = await readJson<{ data?: any[]; error?: string }>(res);
+
       if (res.status === 401) {
         setUnauthorized(true);
         return;
       }
+
       if (!res.ok) {
-        alert((json as any)?.error || '회의실 목록을 불러오지 못했습니다.');
+        safeAlert(json?.error || '회의실 목록을 불러오지 못했습니다.');
         return;
       }
+
       setUnauthorized(false);
-      setRooms(Array.isArray(json?.data) ? json?.data : []);
+      setRooms(Array.isArray(json?.data) ? json.data : []);
     } catch (error) {
       console.error('Failed to load rooms', error);
-      alert('회의실 목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.');
+      safeAlert('회의실 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase
+    let client: SupabaseClient | null = null;
+    let channel: RealtimeChannel | null = null;
+
+    try {
+      client = createClient();
+    } catch (error) {
+      console.warn('Supabase realtime is not configured; skipping subscription.', error);
+      return;
+    }
+
+    channel = client
       .channel('meeting_rooms:realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_rooms' }, () => {
-        load();
+        void load();
       })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        client?.removeChannel(channel);
+      }
     };
   }, [load]);
 
@@ -81,11 +145,13 @@ export default function AdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      const json = await readJson<{ data?: any; error?: any }>(res);
+      const json = await readJson<{ data?: any; error?: string }>(res);
+
       if (!res.ok) {
-        alert((json as any)?.error || '회의실 정보를 저장하지 못했습니다.');
+        safeAlert(json?.error || '회의실 정보를 저장하지 못했습니다.');
         return;
       }
+
       const payload = json?.data;
       if (payload) {
         setRooms((prev) => {
@@ -95,28 +161,34 @@ export default function AdminPage() {
           return [...prev, payload];
         });
       }
+
       setForm({ name: '', location: '', capacity: 4 });
       await load();
     } catch (error) {
       console.error('Failed to submit room form', error);
-      alert('회의실 정보를 저장하지 못했습니다. 잠시 후 다시 시도하세요.');
+      safeAlert('회의실 정보를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.');
     }
   };
 
   const remove = async (id: string) => {
-    if (!confirm('삭제하시겠습니까? 관련 예약도 함께 삭제됩니다.')) return;
+    if (!safeConfirm('삭제하시겠습니까? 관련 예약도 함께 삭제됩니다.')) {
+      return;
+    }
+
     try {
       const res = await fetch(`/api/admin/rooms?id=${id}`, { method: 'DELETE' });
-      const json = await readJson<{ error?: any }>(res);
+      const json = await readJson<{ error?: string }>(res);
+
       if (!res.ok) {
-        alert((json as any)?.error || '회의실 삭제에 실패했습니다.');
+        safeAlert(json?.error || '회의실 삭제에 실패했습니다.');
         return;
       }
+
       setRooms((prev) => prev.filter((room) => room.id !== id));
       await load();
     } catch (error) {
       console.error('Failed to delete room', error);
-      alert('회의실 삭제에 실패했습니다. 잠시 후 다시 시도하세요.');
+      safeAlert('회의실 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.');
     }
   };
 
@@ -128,7 +200,7 @@ export default function AdminPage() {
       }
     } catch (error) {
       console.error('Failed to logout', error);
-      alert('로그아웃에 실패했습니다.');
+      safeAlert('로그아웃에 실패했습니다.');
     }
   };
 
@@ -144,7 +216,7 @@ export default function AdminPage() {
       </div>
       {unauthorized && (
         <Card className="p-4 text-sm">
-          관리자 권한이 필요합니다.{' '}
+          관리자 권한이 필요합니다.{` `}
           <a className="underline" href="/admin/login">
             로그인 페이지로 이동
           </a>
@@ -178,9 +250,7 @@ export default function AdminPage() {
                   id="room-capacity"
                   type="number"
                   value={form.capacity}
-                  onChange={(e) =>
-                    setForm({ ...form, capacity: Number(e.target.value || 0) })
-                  }
+                  onChange={(e) => setForm({ ...form, capacity: Number(e.target.value || 0) })}
                 />
               </div>
             </div>
@@ -212,7 +282,7 @@ export default function AdminPage() {
                     <div className="text-sm">
                       <div className="font-medium">{r.name}</div>
                       <div className="text-muted-foreground">
-                        {r.location} · {r.capacity}명
+                        {r.location} · {r.capacity}인
                       </div>
                     </div>
                     <div className="flex gap-2">

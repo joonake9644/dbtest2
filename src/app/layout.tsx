@@ -1,32 +1,56 @@
-import type { Metadata } from 'next';
+﻿import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import Providers from './providers';
-import Link from 'next/link';
 import { cookies } from 'next/headers';
 import type { UserSession } from '@/types';
+import Nav from '@/components/nav';
+import { Toaster } from '@/components/ui/toaster';
 
-// ... (imports)
+const geistSans = Geist({
+  subsets: ['latin'],
+  variable: '--font-geist-sans',
+});
 
-// ... (metadata)
+const geistMono = Geist_Mono({
+  subsets: ['latin'],
+  variable: '--font-geist-mono',
+});
+
+export const metadata: Metadata = {
+  title: {
+    default: '회의실 예약 시스템',
+    template: '%s | 회의실 예약 시스템',
+  },
+  description: 'Supabase 기반 회의실 예약 및 관리자 관리 시스템',
+};
+
+function getSessionFromCookie(): UserSession | null {
+  const cookieStore = cookies();
+  const sessionCookie = cookieStore.get('user_session');
+
+  if (!sessionCookie) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(sessionCookie.value) as UserSession;
+  } catch {
+    return null;
+  }
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: ReactNode;
 }>) {
-  const cookieStore = cookies();
-  const sessionCookie = cookieStore.get('user_session');
-  let session: UserSession | null = null;
-  if (sessionCookie) {
-    try {
-      session = JSON.parse(sessionCookie.value);
-    } catch {}
-  }
+  const session = getSessionFromCookie();
 
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="ko" suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <Providers>
           <main className="p-6">
             <Nav session={session} />
