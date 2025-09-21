@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { addMonths, isSameMonth, startOfMonth } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,10 +21,11 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from '@/components/ui/select';
+import { MonthlyReservationCalendar } from '@/components/reservations/calendar/monthly-reservation-calendar';
 import { generateTimeSlots, isOverlapping } from '@/lib/utils';
-import type { RoomWithReservations, UserSession } from '@/types';
-import { getRoomsWithReservationsByDate } from '@/lib/services/rooms';
+import type { Reservation, RoomWithReservations, UserSession } from '@/types';
+import { getMonthlyReservations, getRoomsWithReservationsByDate } from '@/lib/services/rooms';
 import { createReservation } from '@/lib/services/reservations';
 import { createClient } from '@/lib/supabase/client';
 import { z } from 'zod';
@@ -36,9 +38,28 @@ export default function HomePageClient({ session }: { session: UserSession | nul
   const { toast } = useToast();
   const [date, setDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [rooms, setRooms] = useState<RoomWithReservations[]>([]);
+  const [monthlyReservations, setMonthlyReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => startOfMonth(new Date()));
+
+  const silentRefreshMonthly = useCallback(async () => {
+    try {
+      const data = await getMonthlyReservations(calendarMonth);
+      setMonthlyReservations(data);
+    } catch (error) {
+      console.error('월간 예약 목록을 새로 고치는 중 오류가 발생했습니다.', error);
+    }
+  }, [calendarMonth]);
+
+  useEffect(() => {
+    setCalendarMonth((prev) => {
+      const target = startOfMonth(new Date(date));
+      return isSameMonth(prev, target) ? prev : target;
+    });
+  }, [date]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +69,7 @@ export default function HomePageClient({ session }: { session: UserSession | nul
         const data = await getRoomsWithReservationsByDate(date);
         if (!cancelled) setRooms(data);
       } catch (e: any) {
-        toast({ title: '불러오기 실패', description: e?.message ?? '데이터 조회 중 오류', variant: 'destructive' });
+        toast({ title: '예약 정보 불러오기 실패', description: e?.message ?? '회의실 정보를 조회할 수 없었습니다.', variant: 'destructive' });
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -58,22 +79,57 @@ export default function HomePageClient({ session }: { session: UserSession | nul
   }, [date, toast]);
 
   useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      setCalendarLoading(true);
+      try {
+        const data = await getMonthlyReservations(calendarMonth);
+        if (!cancelled) setMonthlyReservations(data);
+      } catch (e: any) {
+        if (!cancelled) {
+          toast({
+            title: '월간 예약 불러오기 실패',
+            description: e?.message ?? '월간 예약 정보를 불러오는 중 문제가 발생했습니다.',
+            variant: 'destructive',
+          });
+        }
+      } finally {
+        if (!cancelled) setCalendarLoading(false);
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [calendarMonth, toast]);
+
+  useEffect(() => {
     const supabase = createClient();
     const channel = supabase
       .channel('reservations:realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, async () => {
-        const data = await getRoomsWithReservationsByDate(date);
-        setRooms(data);
+        try {
+          const [dailyRooms, monthly] = await Promise.all([
+            getRoomsWithReservationsByDate(date),
+            getMonthlyReservations(calendarMonth),
+          ]);
+          setRooms(dailyRooms);
+          setMonthlyReservations(monthly);
+        } catch (error) {
+          console.error('실시간 예약 정보를 동기화하는데 실패했습니다.', error);
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [date]);
+  }, [calendarMonth, date]);
+
+  const handleMonthChange = (direction: 'prev' | 'next') => {
+    setCalendarMonth((prev) => addMonths(prev, direction === 'prev' ? -1 : 1));
+  };
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
-       <header className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
+      <header className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">회의실 예약</h1>
+          <h1 className="text-2xl font-semibold">회의실 현황</h1>
           <p className="text-sm text-muted-foreground">날짜별 현황 확인 및 예약</p>
         </div>
         <div className="flex items-center gap-3">
@@ -96,7 +152,7 @@ export default function HomePageClient({ session }: { session: UserSession | nul
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-semibold">{room.name}</p>
-                  <p className="text-xs text-muted-foreground">{room.location} · {room.capacity}인</p>
+                  <p className="text-xs text-muted-foreground">{room.location} · {room.capacity}명</p>
                 </div>
                 <Sheet open={open && selectedRoomId === room.id} onOpenChange={(o) => setOpen(o)}>
                   <SheetTrigger asChild>
@@ -107,12 +163,13 @@ export default function HomePageClient({ session }: { session: UserSession | nul
                       session={session}
                       date={date}
                       roomId={room.id}
-                      busy={room.reservations.map(r => ({ start: r.start_time, end: r.end_time }))}
+                      busy={room.reservations.map((r) => ({ start: r.start_time, end: r.end_time }))}
                       onDone={(ok, msg) => {
                         setOpen(false);
                         if (ok) {
                           toast({ description: '예약이 완료되었습니다.' });
                           getRoomsWithReservationsByDate(date).then(setRooms);
+                          void silentRefreshMonthly();
                         } else {
                           toast({ description: msg ?? '예약 실패', variant: 'destructive' });
                         }
@@ -128,7 +185,7 @@ export default function HomePageClient({ session }: { session: UserSession | nul
                   <ul className="flex flex-wrap gap-2">
                     {room.reservations.map((r) => (
                       <li key={r.id} className="px-2 py-1 rounded bg-gray-100">
-                        {r.start_time.slice(0,5)}~{r.end_time.slice(0,5)}
+                        {r.start_time.slice(0, 5)}~{r.end_time.slice(0, 5)}
                       </li>
                     ))}
                   </ul>
@@ -138,6 +195,16 @@ export default function HomePageClient({ session }: { session: UserSession | nul
           ))}
         </div>
       )}
+
+      <Separator />
+
+      <MonthlyReservationCalendar
+        month={calendarMonth}
+        rooms={rooms}
+        reservations={monthlyReservations}
+        isLoading={calendarLoading}
+        onMonthChange={handleMonthChange}
+      />
     </div>
   );
 }
@@ -169,7 +236,7 @@ function BookingForm({
 }) {
   const router = useRouter();
   const timeSlots = useMemo(() => generateTimeSlots(9, 18, 30), []);
-  
+
   const {
     handleSubmit,
     watch,
@@ -211,7 +278,7 @@ function BookingForm({
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <SheetHeader>
-        <SheetTitle>예약 생성</SheetTitle>
+        <SheetTitle>예약 작성</SheetTitle>
         {session && <p className="text-sm text-muted-foreground">{session.name}님, 환영합니다.</p>}
       </SheetHeader>
       <div className="grid grid-cols-2 gap-3">
@@ -250,7 +317,7 @@ function BookingForm({
 
       {!session && (
         <Card className="bg-muted/50 p-4 text-center">
-          <p className="text-sm text-muted-foreground">예약을 하시려면 로그인이 필요합니다.</p>
+          <p className="text-sm text-muted-foreground">예약을 진행하려면 로그인이 필요합니다.</p>
         </Card>
       )}
 

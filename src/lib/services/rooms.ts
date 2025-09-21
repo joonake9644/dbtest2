@@ -1,3 +1,4 @@
+import { endOfMonth, format, startOfMonth } from 'date-fns';
 import { createClient } from '@/lib/supabase/client';
 import type { Room, RoomWithReservations, Reservation } from '@/types';
 
@@ -15,7 +16,6 @@ export async function getReservationsByDate(
   date: string
 ): Promise<Reservation[]> {
   const supabase = createClient();
-  // Use public view limited to safe columns
   const { data, error } = await supabase
     .from('public_reservations')
     .select('*')
@@ -46,3 +46,17 @@ export async function getRoomsWithReservationsByDate(
   }));
 }
 
+export async function getMonthlyReservations(target: Date | string): Promise<Reservation[]> {
+  const supabase = createClient();
+  const baseDate = typeof target === 'string' ? new Date(target) : target;
+  const start = format(startOfMonth(baseDate), 'yyyy-MM-dd');
+  const end = format(endOfMonth(baseDate), 'yyyy-MM-dd');
+  const { data, error } = await supabase
+    .from('public_reservations')
+    .select('*')
+    .gte('reservation_date', start)
+    .lte('reservation_date', end)
+    .eq('status', 'active');
+  if (error) throw error;
+  return data as unknown as Reservation[];
+}
