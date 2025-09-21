@@ -234,7 +234,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ data: result.data });
     }
 
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const sessionCookie = cookieStore.get('user_session');
 
     if (!sessionCookie) {

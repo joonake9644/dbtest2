@@ -1,9 +1,9 @@
-import { cookies } from 'next/headers';
+﻿import { cookies } from 'next/headers';
 import type { UserSession } from '@/types';
 import HomePageClient from './home-client-page';
 
-function getSessionFromCookie(): UserSession | null {
-  const cookieStore = cookies();
+async function getSessionFromCookie(): Promise<UserSession | null> {
+  const cookieStore = await cookies();
   const sessionCookie = cookieStore.get('user_session');
 
   if (!sessionCookie) {
@@ -17,7 +17,7 @@ function getSessionFromCookie(): UserSession | null {
   }
 }
 
-export default function HomePage() {
-  const session = getSessionFromCookie();
+export default async function HomePage() {
+  const session = await getSessionFromCookie();
   return <HomePageClient session={session} />;
 }

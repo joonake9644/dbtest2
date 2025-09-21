@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { createPureClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 
@@ -19,12 +19,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid phone number or password' }, { status: 401 });
     }
 
-    // Set a session cookie
+    const cookieStore = await cookies();
     const sessionData = JSON.stringify({ userId: user.id, name: user.name });
-    cookies().set('user_session', sessionData, {
+    cookieStore.set('user_session', sessionData, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 60 * 24 * 7, // 1 week
+      maxAge: 60 * 60 * 24 * 7,
       path: '/',
     });
 

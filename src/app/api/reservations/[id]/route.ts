@@ -1,15 +1,17 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { cookies } from 'next/headers';
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function DELETE(req: Request, context: RouteContext) {
   try {
-    const reservationId = params.id;
+    const { id: reservationId } = await context.params;
     if (!reservationId) {
       return NextResponse.json({ error: 'Reservation ID is required' }, { status: 400 });
     }
 
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const sessionCookie = cookieStore.get('user_session');
     if (!sessionCookie) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
@@ -36,4 +38,3 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     return NextResponse.json({ error: e?.message ?? 'An unexpected error occurred' }, { status: 500 });
   }
 }
-

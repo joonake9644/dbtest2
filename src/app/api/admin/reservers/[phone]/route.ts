@@ -1,12 +1,14 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { createPureClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth/admin';
 
-export async function GET(req: Request, { params }: { params: { phone: string } }) {
+type RouteContext = { params: Promise<{ phone: string }> };
+
+export async function GET(req: Request, context: RouteContext) {
   const adminErr = requireAdmin(req as any);
   if (adminErr) return adminErr;
 
-  const phone = params.phone;
+  const { phone } = await context.params;
   if (!phone) {
     return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
   }
@@ -21,11 +23,11 @@ export async function GET(req: Request, { params }: { params: { phone: string } 
   return NextResponse.json({ data });
 }
 
-export async function DELETE(req: Request, { params }: { params: { phone: string } }) {
+export async function DELETE(req: Request, context: RouteContext) {
   const adminErr = requireAdmin(req as any);
   if (adminErr) return adminErr;
 
-  const phone = params.phone;
+  const { phone } = await context.params;
   if (!phone) {
     return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
   }

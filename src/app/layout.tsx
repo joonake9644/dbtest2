@@ -23,11 +23,11 @@ export const metadata: Metadata = {
     default: '회의실 예약 시스템',
     template: '%s | 회의실 예약 시스템',
   },
-  description: 'Supabase 기반 회의실 예약 및 관리자 관리 시스템',
+  description: 'Supabase 기반 회의실 예약 및 조회 관리 시스템',
 };
 
-function getSessionFromCookie(): UserSession | null {
-  const cookieStore = cookies();
+async function getSessionFromCookie(): Promise<UserSession | null> {
+  const cookieStore = await cookies();
   const sessionCookie = cookieStore.get('user_session');
 
   if (!sessionCookie) {
@@ -41,12 +41,12 @@ function getSessionFromCookie(): UserSession | null {
   }
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: ReactNode;
 }>) {
-  const session = getSessionFromCookie();
+  const session = await getSessionFromCookie();
 
   return (
     <html lang="ko" suppressHydrationWarning>
